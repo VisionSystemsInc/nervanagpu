@@ -400,6 +400,15 @@ class GPUTensor(object):
                 name       = self.name,
                 rounding   = self.rounding)
 
+    def transpose(self, out=None):
+        """
+        Return a transposed view of the data.  Alias of .T property needed for
+        MOP compatibility.
+        """
+        if out:
+            return OpTreeNode.build("assign", out, self.T)
+        return self.T
+
     def __add__      (self, other): return OpTreeNode.build("add", self, other)
     def __sub__      (self, other): return OpTreeNode.build("sub", self, other)
     def __mul__      (self, other): return OpTreeNode.build("mul", self, other)
