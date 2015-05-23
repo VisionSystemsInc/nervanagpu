@@ -689,7 +689,6 @@ def call_compound_kernel(rand_state, *args):
     kernel_args = [ rand_state, ]
     type_args   = []
     shape_stack = []
-
     # Apply reduction constraints and determine thread axis
     # Blocks will be allocated counter to this axis
     reduction = False
@@ -833,10 +832,9 @@ def call_compound_kernel(rand_state, *args):
 
     # get or create the kernel in the memoize cache
     kernel = _get_compound_kernel(tuple(type_args))
-
     # call the kernel with the number of blocks set as the size of the off-axis
     # Maxwell does well with 32 thread sized blocks, no need to autotune.
-    kernel.prepared_call((max_shape[1-axis],1,1), (32,1,1), *kernel_args)
+    kernel.prepared_async_call((max_shape[1-axis],1,1), (32,1,1), out.backend.stream, *kernel_args)
 
     return out
 
