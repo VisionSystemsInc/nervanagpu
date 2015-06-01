@@ -19,7 +19,7 @@ from nervanagpu      import NervanaGPU
 from pycuda.autoinit import context
 from operator        import mul
 
-print context.get_device().name()
+print(context.get_device().name())
 
 np.set_printoptions(threshold=8193, linewidth=600, formatter={'int':lambda x: "%10d" % x,'float':lambda x: "% .3f" % x})
 
@@ -150,35 +150,35 @@ if cpu:
     cpuI = cpuI[:-1,:].reshape(dimI)
     cpuB = cpuB[:-1,:].reshape(dimI)
 
-    #print cpuI[1,0,:,:,0], "\n"
-    #print cpuO[1,0,:,:,0], "\n"
-    # print cpuB[0,0,:,:,0], "\n"
+    #print(cpuI[1,0,:,:,0], "\n")
+    #print(cpuO[1,0,:,:,0], "\n")
+    # print(cpuB[0,0,:,:,0], "\n")
 
     devO = devO.get().astype(np.float32)
     devB = devB.get().astype(np.float32)
 
-    #print devO[1,0,:,:,0], "\n"
-    # print devB[0,0,:,:,0], "\n"
+    #print(devO[1,0,:,:,0], "\n")
+    # print(devB[0,0,:,:,0], "\n")
 
     difO = np.absolute(cpuO - devO)
-    print "difO max: ", difO.max(), "\n"
+    print("difO max: ", difO.max(), "\n")
 
     difB = np.absolute(cpuB - devB)
-    print "difB max: ", difB.max(), "\n"
+    print("difB max: ", difB.max(), "\n")
 
     # for c in range(C):
     #     for n in range(N):
     #         if difB[c,0,:,:,n].max() > 1:
-    #             print cpuI[c,0,:,:,n], "\n"
-    #             print cpuB[c,0,:,:,n], "\n"
-    #             print devB[c,0,:,:,n], "\n"
-    #             print difB[c,0,:,:,n], "\n"
-    #             print c, n
+    #             print(cpuI[c,0,:,:,n], "\n")
+    #             print(cpuB[c,0,:,:,n], "\n")
+    #             print(devB[c,0,:,:,n], "\n")
+    #             print(difB[c,0,:,:,n], "\n")
+    #             print(c, n)
 
 
-    # print difB
-    # print np.argmax(difB) #[0,0,:,:,0], "\n"
-    # print "difB max: ", difB.max(), "\n"
+    # print(difB)
+    # print(np.argmax(difB) #[0,0,:,:,0], "\n")
+    # print("difB max:", difB.max(), "\n")
     # for op, devA, cpuA in (
     #     ("fprop",devO,cpuO),
     #     ("bprop",devB,cpuB[:-1,:].reshape(dimI)),
@@ -189,10 +189,10 @@ if cpu:
     #     devA = devA.get().astype(np.float32)
 
     #     difA = np.absolute(cpuA - devA)
-    #     print op, "diff max: ", difA.max(), "\n"
+    #     print(op, "diff max:", difA.max(), "\n")
 
-        # print devA[0,0,::4,::4,0], "\n"
-        # print cpuA[0,0,::4,::4,0], "\n"
-        # print difA[0,0,::4,::4,0], "\n"
-        # print difA[1,0,::4,::4,0], "\n"
-        # print difA[2,0,::4,::4,0], "\n"
+        # print(devA[0,0,::4,::4,0], "\n")
+        # print(cpuA[0,0,::4,::4,0], "\n")
+        # print(difA[0,0,::4,::4,0], "\n")
+        # print(difA[1,0,::4,::4,0], "\n")
+        # print(difA[2,0,::4,::4,0], "\n")

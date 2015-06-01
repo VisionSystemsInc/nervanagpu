@@ -19,7 +19,7 @@ from nervanagpu import NervanaGPU
 from pycuda.autoinit import context
 from scikits.cuda import cublas
 
-print context.get_device().name()
+print(context.get_device().name())
 
 handle = cublas.cublasCreate()
 
@@ -49,7 +49,8 @@ def cublas_dot(A, B, C, alpha=1.0, beta=0.0, repeat=1):
     end.synchronize()
     msecs = end.time_since(start) / repeat
     gflops = (m * n * k * 2.0) / (msecs * 1000000.0)
-    print "%7.3f msecs %4.0f gflops (%s_%s   : %d,%d,%d)" % (msecs,gflops,"cublas",op,m,n,k)
+    print("%7.3f msecs %4.0f gflops (%s_%s   : %d,%d,%d)" %
+          (msecs,gflops,"cublas",op,m,n,k))
 
 
 np.set_printoptions(threshold=8193, linewidth=600, formatter={'float':lambda x: "% .0f" % x})
@@ -106,8 +107,8 @@ for dtype in (np.float16, np.float32,):
                 mean = ng.mean(abs(devC2), partial=partial1, out=partial2).get()[0,0]
 
                 #if diff > .1:
-                print "Error: %.3f%%" % (100 * diff / mean)
+                print("Error: %.3f%%" % (100 * diff / mean))
 
-                print "--------------------------------------------------------------------------------"
+                print("--------------------------------------------------------------------------------")
 
 cublas.cublasDestroy(handle)

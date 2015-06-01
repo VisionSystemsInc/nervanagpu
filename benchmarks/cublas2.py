@@ -20,7 +20,7 @@ from pycuda.autoinit import context
 from scikits.cuda import cublas
 from ipdb import set_trace
 
-print context.get_device().name()
+print(context.get_device().name())
 
 handle = cublas.cublasCreate()
 
@@ -50,7 +50,8 @@ def cublas_dot(A, B, C, repeat=1):
     end.synchronize()
     msecs = end.time_since(start) / repeat
     gflops = (m * n * k * 2.0) / (msecs * 1000000.0)
-    print "%7.3f msecs %4.0f gflops (%s_%s   : %d,%d,%d)" % (msecs,gflops,"cublas",op,m,n,k)
+    print("%7.3f msecs %4.0f gflops (%s_%s   : %d,%d,%d)" %
+          (msecs,gflops,"cublas",op,m,n,k))
 
     return gflops
 
@@ -133,9 +134,10 @@ for dtype in (np.float16,np.float32):
 
             note = "**************" if flops_diff <= 0 else ""
             
-            print "Faster: %.0f gflops Choice: %d Error: %.3f%%%s" % (flops_diff, fastest, 100 * diff / mean, note)
+            print("Faster: %.0f gflops Choice: %d Error: %.3f%%%s" %
+                  (flops_diff, fastest, 100 * diff / mean, note))
 
-        print "--------------------------------------------------------------------------------"
+        print("--------------------------------------------------------------------------------")
 
 
 cublas.cublasDestroy(handle)

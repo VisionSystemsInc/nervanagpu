@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+import sys
 import numpy as np
 import pycuda.driver as drv
 from pycuda.tools import context_dependent_memoize
@@ -21,6 +22,8 @@ from pytools import memoize, memoize_method
 from .float_ew import call_compound_kernel
 from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 
+if sys.version_info >= (3, 0):
+    from functools import reduce
 
 class GPUTensor(object):
 
