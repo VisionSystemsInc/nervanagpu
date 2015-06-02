@@ -45,7 +45,7 @@ define op_template
   ifneq ("$(wildcard $(CUSRC_DIR)/$(2)$(1)$(3)$(4)$(5).cu)","")
     $(1)_OPS += $(addprefix $(CUBIN_DIR)/, \
                   $(addsuffix .cubin,$(2)$(1)$(3)$(4)$(5)))
-    ifneq ($(filter $(3),_bprop _updat),)
+    ifneq ($(filter $(3),_bprop _updat _max),)
       ifeq ($(2),h)
         NVCCFLAGS_$(2)$(1)$(3)$(4)$(5) := -arch sm_52
       else

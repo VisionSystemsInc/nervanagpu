@@ -1049,7 +1049,7 @@ def _get_pool_kernel(path, clss, op):
     module = _get_module(path, clss, op)
     kernel = "{0}_{1}".format(clss, op)
     func   = module.get_function(kernel)
-    func.prepare("PPPIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII")
+    func.prepare("PPPIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIf")
     #print("Loaded: ", kernel)
     return func
 
