@@ -22,7 +22,7 @@ from nervanagpu      import NervanaGPU, GPUTensor
 from math import sqrt
 from time import sleep
 
-print context.get_device().name()
+print(context.get_device().name())
 
 # Set dtype to float32 or float16
 dtype  = np.float16
@@ -38,7 +38,7 @@ def end_bench(op):
     end.synchronize()
     msecs  = end.time_since(start) / repeat
     gflops = conv.flops / (msecs * 1000000.0)
-    print "%7.3f msecs %8.3f gflops (%s: %s)" % (msecs, gflops, op, conv)
+    print("%7.3f msecs %8.3f gflops (%s: %s)" % (msecs, gflops, op, conv))
 
 ng = NervanaGPU(stochastic_round=False, bench=True)
 
@@ -92,7 +92,7 @@ for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
     dimF = conv.dimF2
     dimO = conv.dimO2
 
-    print "cudnn:"
+    print("cudnn:")
 
     cuI = ng.empty(dimI[::-1], dtype=np.float32)
     cuF = ng.empty(dimF[::-1], dtype=np.float32)
@@ -104,7 +104,7 @@ for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
     cuF[:] = 2 * (.5 - ng.rand())
     cuE[:] = 2 * (.5 - ng.rand())
 
-    #print drv.mem_get_info()
+    #print(drv.mem_get_info())
 
     I_data = ctypes.c_void_p(int(cuI.gpudata))
     F_data = ctypes.c_void_p(int(cuF.gpudata))
@@ -125,7 +125,7 @@ for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
     algo    = libcudnn.cudnnGetConvolutionForwardAlgorithm(cudnn, I_desc, F_desc, C_desc, O_desc, fwd_pref, 0)
     ws_size = libcudnn.cudnnGetConvolutionForwardWorkspaceSize(cudnn, I_desc, F_desc, C_desc, O_desc, algo)
 
-    #print algo.value, ws_size.value
+    #print(algo.value, ws_size.value)
 
     ws_ptr  = drv.mem_alloc(ws_size.value) if ws_size.value > 0 else 0
     ws_data = ctypes.c_void_p(int(ws_ptr))
@@ -148,7 +148,7 @@ for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
     end_bench("updat")
 
 
-    print "\nnervana_lib:"
+    print("\nnervana_lib:")
 
     nlI = ng.empty(dimI, dtype=dtype)
     nlI[:] = cuI.T
@@ -165,7 +165,7 @@ for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
     nlB = ng.empty(dimI, dtype=dtype)
     nlU = ng.empty(dimF, dtype=dtype)
     nlO = ng.empty(dimO, dtype=dtype)
-    #print drv.mem_get_info()
+    #print(drv.mem_get_info())
 
     ng.fprop_conv (conv, nlI, nlF, nlO, alpha=alpha, repeat=repeat)
     ng.bprop_conv (conv, nlF, nlE, nlB, alpha=alpha, repeat=repeat)
@@ -173,7 +173,7 @@ for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
 
     nlI = nlF = nlE = None
 
-    print "\ncudnn vs nervanaLib:"
+    print("\ncudnn vs nervanaLib:")
 
     parO = ng.empty((N,1), dtype=np.float32)
     parB = ng.empty((N,1), dtype=np.float32)
@@ -190,10 +190,10 @@ for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
     meanb = ng.mean(abs(cuB), partial=parB, out=maxB).get()[0,0]
     meanu = ng.mean(abs(cuU), partial=parU, out=maxU).get()[0,0]
 
-    print "        maxerr   mean   pct"
-    print "fprop: %7.5f %6.2f %5.3f" % (maxo, meano, 100*maxo/meano)
-    print "bprop: %7.5f %6.2f %5.3f" % (maxb, meanb, 100*maxb/meanb)
-    print "updat: %7.5f %6.2f %5.3f" % (maxu, meanu, 100*maxu/meanu)
+    print("        maxerr   mean   pct")
+    print("fprop: %7.5f %6.2f %5.3f" % (maxo, meano, 100*maxo/meano))
+    print("bprop: %7.5f %6.2f %5.3f" % (maxb, meanb, 100*maxb/meanb))
+    print("updat: %7.5f %6.2f %5.3f" % (maxu, meanu, 100*maxu/meanu))
 
     # free up memory from this layer before proceeding
     cuB  = cuU  = cuO  = None

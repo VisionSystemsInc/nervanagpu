@@ -17,7 +17,7 @@ import numpy as np
 from nervanagpu import NervanaGPU
 from pycuda.autoinit import context
 
-print context.get_device().name()
+print(context.get_device().name())
 
 np.set_printoptions(threshold=8193, linewidth=600, formatter={'float':lambda x: "% .0f" % x})
 
@@ -28,7 +28,7 @@ repeat = 1
 cpu    = 1  # Set CPU to 1 to check against CPU
 
 for data_type in ("All Ones", "Random Data",): #"All Ones", "Random Data"
-    print data_type
+    print(data_type)
     for size in ((3072,3072,3072*2),): #(4095,4095,4095) 
         m, n, k = size
         for op in ("tn","nn","nt"): #"tn","nn","nt"
@@ -61,10 +61,10 @@ for data_type in ("All Ones", "Random Data",): #"All Ones", "Random Data"
                 cpuD = devC.get()
                 diff = np.absolute(cpuC - cpuD)
 
-                print diff.max()
-                print cpuD[::max(m//4,1),::max(n//4,1)]
-                print cpuC[::max(m//4,1),::max(n//4,1)]
-                print diff[::max(m//4,1),::max(n//4,1)]
+                print(diff.max())
+                print(cpuD[::max(m//4,1),::max(n//4,1)])
+                print(cpuC[::max(m//4,1),::max(n//4,1)])
+                print(diff[::max(m//4,1),::max(n//4,1)])
 
-                # print cpuD
+                # print(cpuD)
                 # exit()

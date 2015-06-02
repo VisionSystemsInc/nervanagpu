@@ -12,7 +12,7 @@ class TestTensor(object):
 		self.gpu = ng.NervanaGPU(stochastic_round=False)
 		self.dims = (1024,1024)
 
- 	def init_helper(self, lib, inA, inB, dtype):
+	def init_helper(self, lib, inA, inB, dtype):
 
 		A = lib.array(inA, dtype=dtype)
 		B = lib.array(inB, dtype=dtype)

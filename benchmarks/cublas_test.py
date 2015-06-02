@@ -19,7 +19,7 @@ from nervanagpu import NervanaGPU
 from pycuda.autoinit import context
 from scikits.cuda import cublas
 
-print context.get_device().name()
+print(context.get_device().name())
 
 start, end = (drv.Event(), drv.Event())
 
@@ -51,7 +51,8 @@ def cublas_dot(A, B, C, alpha=1.0, beta=0.0, repeat=1):
         end.synchronize()
         msecs = end.time_since(start) / repeat
         gflops = (m * n * k * 2.0) / (msecs * 1000000.0)
-        print "%7.3f msecs %4.0f gflops (%s_%s   : %d,%d,%d)" % (msecs,gflops,"cublas",op,m,n,k)
+        print("%7.3f msecs %4.0f gflops (%s_%s   : %d,%d,%d)" %
+              (msecs,gflops,"cublas",op,m,n,k))
 
 
 np.set_printoptions(threshold=8193, linewidth=600, formatter={'float':lambda x: "% .0f" % x})
@@ -80,15 +81,15 @@ for dtype in (np.float16, np.float32, ):
 
     itemsize = np.dtype(dtype).itemsize
 
-    print dtype
+    print(dtype)
     
     for size in (small_1, small_2, medium_1, medium_2, big_1, big_2):
-        print size
+        print(size)
 
         for K in size:
-            print "K: ", K
+            print("K:", K)
             for C in (size):
-                print "C: ", C
+                print("C:", C)
                 for N in (size):
 
                     for alpha, beta in ((1.0,0.0), (0.5,0.5)):
@@ -146,7 +147,8 @@ for dtype in (np.float16, np.float32, ):
                                         partial2 = partial1[0:1,0:1]
 
                                         if ng.min(ng.finite(devC1), partial=partial1, out=partial2).get()[0,0] == 0.0:
-                                            print "Error: NaN KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" % (K,C,N, alpha,beta, itemsize)
+                                            print("Error: NaN KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" %
+                                                  (K,C,N, alpha,beta, itemsize))
                                             exit()
 
                                         diff = ng.max(abs(devC2 - devC1), partial=partial1, out=partial2).get()[0,0]
@@ -154,17 +156,20 @@ for dtype in (np.float16, np.float32, ):
                                         pctErr = 100 * diff / mean
 
                                         if pctErr > maxerr:
-                                            print "Error: %.3f%% diff: %.5f mean %.5f op: %s tile: %d KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" % (pctErr, diff, mean, op, tile, K,C,N, alpha,beta, itemsize)
+                                            print("Error: %.3f%% diff: %.5f mean %.5f op: %s tile: %d KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" %
+                                                  (pctErr, diff, mean, op, tile, K,C,N, alpha,beta, itemsize))
                                             exit()
                                     
                                     except drv.Error as e:
-                                        print "op: %s tile: %d KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" % (op, tile, K,C,N, alpha,beta, itemsize)
-                                        print e
+                                        print("op: %s tile: %d KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" %
+                                              (op, tile, K,C,N, alpha,beta, itemsize))
+                                        print(e)
                                         exit()
 
                             except drv.Error as e:
-                                print "op: %s KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" % (op, K,C,N, alpha,beta, itemsize)
-                                print e
+                                print("op: %s KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" %
+                                      (op, K,C,N, alpha,beta, itemsize))
+                                print(e)
                                 exit()
 
 

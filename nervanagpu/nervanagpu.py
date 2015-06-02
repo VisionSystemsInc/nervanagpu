@@ -13,14 +13,17 @@
 # limitations under the License.
 
 import os
+import sys
 import numpy as np
 import pycuda.driver as drv
 from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
-from float_ew import call_compound_kernel
-from layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
+from .float_ew import call_compound_kernel
+from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 
+if sys.version_info >= (3, 0):
+    from functools import reduce
 
 class GPUTensor(object):
 
@@ -69,7 +72,7 @@ class GPUTensor(object):
 
         if gpudata is None:
             if size:
-                #print drv.mem_get_info()
+                #print(drv.mem_get_info())
                 self.gpudata = allocator(self.nbytes)
             else:
                 self.gpudata = None
@@ -602,8 +605,8 @@ class NervanaGPU(object):
             end.synchronize()
             msecs  = end.time_since(start) / repeat
             gflops = layer.flops / (msecs * 1000000.0)
-            print "%7.3f msecs %8.3f gflops (%s: %s) size:%s grid:%s" \
-                  "" % (msecs, gflops, op, layer, size, grid)
+            print("%7.3f msecs %8.3f gflops (%s: %s) size:%s grid:%s" %
+                  (msecs, gflops, op, layer, size, grid))
 
     def pool_layer(self, dtype,
             op, N, C,
@@ -687,7 +690,7 @@ class NervanaGPU(object):
             end.record()
             end.synchronize()
             msecs  = end.time_since(start) / repeat
-            print "%7.3f msecs (%s) grid:%s" % (msecs, layer, layer.grid)
+            print("%7.3f msecs (%s) grid:%s" % (msecs, layer, layer.grid))
 
     def dot(self, A, B, C, alpha=1.0, beta=0.0, relu=False, repeat=1, size=None):
         """
@@ -799,8 +802,8 @@ class NervanaGPU(object):
             end.synchronize()
             msecs = end.time_since(start) / repeat
             gflops = (m * n * k * 2.0) / (msecs * 1000000.0)
-            print "%7.3f msecs %4.0f gflops (%s_%s: %d,%d,%d) size:%s grid:(%d,%d)" % \
-                (msecs,gflops,clss,op,m,n,k, size,gridA,gridB)
+            print("%7.3f msecs %4.0f gflops (%s_%s: %d,%d,%d) size:%s grid:(%d,%d)" %
+                  (msecs,gflops,clss,op,m,n,k, size,gridA,gridB))
             if repeat > 1:
                 return gflops
 
@@ -1028,7 +1031,7 @@ def _get_gemm_kernel(path, clss, op, size):
     kernel = "{0}_{1}_{2}".format(clss, op, size)
     func   = module.get_function(kernel)
     func.prepare("PPPPIIIIIIffI")
-    #print "Loaded: ", kernel
+    #print("Loaded: ", kernel)
     return func
 
 @context_dependent_memoize
@@ -1037,7 +1040,7 @@ def _get_conv_kernel(path, clss, op, size):
     kernel = "{0}_{1}_{2}".format(clss, op, size)
     func   = module.get_function(kernel)
     func.prepare("PPPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII")
-    #print "Loaded: ", kernel
+    #print("Loaded: ", kernel)
     return func
 
 @context_dependent_memoize
@@ -1047,6 +1050,6 @@ def _get_pool_kernel(path, clss, op):
     kernel = "{0}_{1}".format(clss, op)
     func   = module.get_function(kernel)
     func.prepare("PPPIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII")
-    #print "Loaded: ", kernel
+    #print("Loaded: ", kernel)
     return func
 

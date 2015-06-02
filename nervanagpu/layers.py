@@ -17,6 +17,10 @@ import pycuda.driver as drv
 from pycuda.tools import context_dependent_memoize
 from operator import mul
 from math     import ceil
+import sys
+
+if sys.version_info >= (3, 0):
+    from functools import reduce
 
 class Layer(object):
     def __init__(self, lib, dtype, N):
