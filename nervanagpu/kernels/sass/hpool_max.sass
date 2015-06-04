@@ -5,9 +5,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -144,9 +144,9 @@
 --:-:-:-:1      MOV HWN,        param_HWN;
 --:-:-:-:1      MOV DHWN,       param_DHWN;
 
-// kj = k * str_j - pad_j 
-// mt = m * str_d - pad_d 
-// pr = p * str_h - pad_h 
+// kj = k * str_j - pad_j
+// mt = m * str_d - pad_d
+// pr = p * str_h - pad_h
 // qs = q * str_w - pad_w
 --:-:-:-:1      VMAD.U16.U16 kj, k, str_j, -pad_j;
 --:-:-:-:1      VMAD.U16.U16 mt, m, str_d, -pad_d;
@@ -298,19 +298,19 @@ BPROP:
 
 // bprop
 --:-:-:-:6      IADD   Back0.CC, Back0, maxIdx;
---:-:-:-:0      IADD.X Back1,    Back1, RZ;
+--:-:-:-:2      IADD.X Back1,    Back1, RZ;
 
---:-:-:-:5  @P4 BRA.U OVERLAP;
+//--:-:-:-:5  @P4 BRA.U OVERLAP;
 
 --:-:-:-:1      STG.E.CG.S16 [Back0], bprop;
---:-:-:-:5      BRA.U EXIT;
-
-OVERLAP:
-
---:-:-:-:1  @P0 SHL bprop, bprop, 16;
---:-:-:-:2  @P0 LOP32I.AND Back0, Back0, 0xfffffffc;
-
---:-:-:-:1      RED.E.ADD.F16x2.FTZ.RN [Back0], bprop;
+//--:-:-:-:5      BRA.U EXIT;
+//
+//OVERLAP:
+//
+//--:-:-:-:1  @P0 SHL bprop, bprop, 16;
+//--:-:-:-:2  @P0 LOP32I.AND Back0, Back0, 0xfffffffc;
+//
+//--:-:-:-:1      RED.E.ADD.F16x2.FTZ.RN [Back0], bprop;
 
 EXIT:
 
