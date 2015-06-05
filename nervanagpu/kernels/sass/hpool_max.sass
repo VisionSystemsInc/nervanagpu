@@ -112,7 +112,7 @@
 --:-:-:-:1      LEA      Out0.CC, iOut, param_O[0],     1;
 --:-:-:-:1      LEA.HI.X Out1,    iOut, param_O[1], RZ, 1;
 
---:-:5:-:1  @P5 LDG.E.CI.S16 bprop, [Out];
+--:-:5:-:1  @P5 LDG.E.CI.U16 bprop, [Out];
 
 --:-:-:-:1      ISETP.GT.AND P0, PT, JRST, RZ, PT;
 --:-:-:-:1      ISETP.GT.AND P1, PT, JRST, 1,  PT;
@@ -236,19 +236,19 @@ LOOP:
 
 --:-:-:-:6      IADD   load0In0.CC, In0, inOffset0;
 --:-:-:-:2      IADD.X load0In1,    In1, RZ;
---:-:1:-:1  @P0 LDG.E.CI.S16 load0, [load0In];
+--:-:1:-:1  @P0 LDG.E.CI.U16 load0, [load0In];
 
 --:-:-:-:6  @P1 IADD   load1In0.CC, In0, inOffset1;
 --:-:-:-:2  @P1 IADD.X load1In1,    In1, RZ;
---:-:2:-:1  @P1 LDG.E.CI.S16 load1, [load1In];
+--:-:2:-:1  @P1 LDG.E.CI.U16 load1, [load1In];
 
 --:-:-:-:6  @P2 IADD   load2In0.CC, In0, inOffset2;
 --:-:-:-:2  @P2 IADD.X load2In1,    In1, RZ;
---:-:3:-:1  @P2 LDG.E.CI.S16 load2, [load2In];
+--:-:3:-:1  @P2 LDG.E.CI.U16 load2, [load2In];
 
 --:-:-:-:6  @P3 IADD   load3In0.CC, In0, inOffset3;
 --:-:-:-:2  @P3 IADD.X load3In1,    In1, RZ;
---:-:4:-:1  @P3 LDG.E.CI.S16 load3, [load3In];
+--:-:4:-:1  @P3 LDG.E.CI.U16 load3, [load3In];
 
 --:-:-:-:1      IADD jrst_0, jrst_0, 4;
 --:-:-:-:1      IADD jrst_1, jrst_1, 4;
@@ -307,7 +307,8 @@ BPROP:
 
 OVERLAP:
 
---:-:-:-:1  @P0 SHL bprop, bprop, 16;
+--:-:-:-:1 @!P0 LOP32I.AND bprop, bprop, 0x0000ffff;
+--:-:-:-:1  @P0 SHL        bprop, bprop, 16;
 --:-:-:-:2  @P0 LOP32I.AND Back0, Back0, 0xfffffffc;
 
 --:-:-:-:1      RED.E.ADD.F16x2.FTZ.RN [Back0], bprop;
