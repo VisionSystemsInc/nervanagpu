@@ -27,7 +27,7 @@ if sys.version_info >= (3, 0):
 
 class GPUTensor(object):
 
-    def __init__(self, shape,
+    def __init__(self, backend, shape,
                 dtype     = np.float16,
                 allocator = drv.mem_alloc,
                 base      = None,
@@ -60,6 +60,7 @@ class GPUTensor(object):
         else:
             self.strides = tuple(strides)
 
+        self.backend    = backend
         self.base       = base
         self.shape      = shape
         self.size       = size
@@ -123,6 +124,10 @@ class GPUTensor(object):
     def __int__(self):
         return int(self.gpudata)
 
+    @property
+    def ptr(self):
+        return self.gpudata.__int__()
+
     def __len__(self):
         """Return the size of the leading dimension of self."""
         if len(self.shape):
@@ -144,6 +149,7 @@ class GPUTensor(object):
         Returns:
             self
         """
+        stream = self.backend.stream
         assert ary.size == self.size
         assert self.is_contiguous, "Array in set() must be contiguous"
         if ary.dtype is not self.dtype:
@@ -151,18 +157,18 @@ class GPUTensor(object):
         assert ary.strides == self.strides
 
         if device is None:
-            drv.memcpy_htod(self.gpudata, ary)
+            drv.memcpy_htod_async(self.gpudata, ary, stream)
         else:
             # with multithreaded datasets, make a context before copying
             # and destroy it again once done.
-            ctx = drv.Device(device).make_context()
-            drv.memcpy_htod(self.gpudata, ary)
-            ctx.pop()
-            del ctx
+            lctx = drv.Device(device).make_context()
+            drv.memcpy_htod_async(self.gpudata, ary, stream)
+            lctx.pop()
+            del lctx
 
         return self
 
-    def get(self):
+    def get(self, stream=None):
         """
         copy device array to host.
         Returns:
@@ -170,7 +176,7 @@ class GPUTensor(object):
         """
         assert self.is_contiguous, "Array in get() must be contiguous"
         ary = np.empty(self.shape, self.dtype)
-        drv.memcpy_dtoh(ary, self.gpudata)
+        drv.memcpy_dtoh_async(ary, self.gpudata, stream)
         return ary
 
     def asnumpyarray(self):
@@ -260,6 +266,7 @@ class GPUTensor(object):
             array_axis += 1
 
         return self.__class__(
+                backend    = self.backend,
                 shape      = tuple(new_shape),
                 dtype      = self.dtype,
                 allocator  = self.allocator,
@@ -271,6 +278,7 @@ class GPUTensor(object):
 
     def _assign(self, value):
 
+        stream = self.backend.stream
         if isinstance(value, (int, float)):
 
             # if we have a contiguous array, then use the speedy driver kernel
@@ -279,17 +287,17 @@ class GPUTensor(object):
                 value = self.dtype.type(value)
 
                 if self.dtype.itemsize == 1:
-                    drv.memset_d8( self.gpudata,
+                    drv.memset_d8_async( self.gpudata,
                                    unpack_from('B', value)[0],
-                                   self.size)
+                                   self.size, stream)
                 elif self.dtype.itemsize == 2:
-                    drv.memset_d16(self.gpudata,
+                    drv.memset_d16_async(self.gpudata,
                                    unpack_from('H', value)[0],
-                                   self.size)
+                                   self.size, stream)
                 else:
-                    drv.memset_d32(self.gpudata,
+                    drv.memset_d32_async(self.gpudata,
                                    unpack_from('I', value)[0],
-                                   self.size)
+                                   self.size, stream)
 
             # otherwise use our copy kerel
             else:
@@ -298,7 +306,7 @@ class GPUTensor(object):
         elif isinstance(value, GPUTensor):
             # TODO: add an is_binary_compat like function
             if self.is_contiguous and value.is_contiguous and self.dtype == value.dtype:
-                drv.memcpy_dtod(self.gpudata, value.gpudata, self.nbytes)
+                drv.memcpy_dtod_async(self.gpudata, value.gpudata, self.nbytes, stream)
             else:
                 OpTreeNode.build("assign", self, value)
 
@@ -308,7 +316,7 @@ class GPUTensor(object):
 
         # assign to numpy array (same as set())
         elif isinstance(value, np.ndarray):
-            self.set(value)
+            self.set(value, device=None)
 
         else:
             raise TypeError("Invalid type for assignment: %s" % type(value))
@@ -349,6 +357,7 @@ class GPUTensor(object):
                             "arrays is not yet supported")
 
         return self.__class__(
+                backend    = self.backend,
                 shape      = shape,
                 dtype      = self.dtype,
                 allocator  = self.allocator,
@@ -378,6 +387,7 @@ class GPUTensor(object):
             dtype = np.dtype(dtype)
 
         return self.__class__(
+                backend    = self.backend,
                 shape      = shape,
                 dtype      = dtype,
                 allocator  = self.allocator,
@@ -393,6 +403,7 @@ class GPUTensor(object):
         return a transposed view
         """
         return self.__class__(
+                backend    = self.backend,
                 shape      = self.shape[::-1],
                 dtype      = self.dtype,
                 allocator  = self.allocator,
@@ -448,40 +459,41 @@ class NervanaGPU(object):
         self.round_mode = 1 if stochastic_round else 0
         self.cubin_path = os.path.join(os.path.dirname(__file__), cubin_path)
         self.bench = bench
+        self.stream = None
 
     def empty(self, shape, dtype=np.float16, name=None, allocator=drv.mem_alloc):
         """
         allocate the space for a GPUTensor
         """
-        return GPUTensor(shape, dtype, allocator=allocator,
+        return GPUTensor(self, shape, dtype, allocator=allocator,
                           name=name, rounding=self.round_mode)
 
     def array(self, ary, dtype=np.float16, name=None, allocator=drv.mem_alloc):
         """
         converts a numpy array to a GPUTensor
         """
-        return GPUTensor(ary.shape, dtype, allocator=allocator,
+        return GPUTensor(self, ary.shape, dtype, allocator=allocator,
                           name=name, rounding=self.round_mode).set(ary)
 
     def zeros(self, shape, dtype=np.float16, name=None, allocator=drv.mem_alloc):
         """
         Returns an array of the given shape and dtype filled with 0's.
         """
-        return GPUTensor(shape, dtype, allocator=allocator,
+        return GPUTensor(self, shape, dtype, allocator=allocator,
                           name=name, rounding=self.round_mode)._assign(0)
 
     def ones(self, shape, dtype=np.float16, name=None, allocator=drv.mem_alloc):
         """
         Returns an array of the given shape and dtype filled with 1's.
         """
-        return GPUTensor(shape, dtype, allocator,
+        return GPUTensor(self, shape, dtype, allocator,
                           name=name, rounding=self.round_mode)._assign(1)
 
     def empty_like(self, other_ary, name=None):
         """
         Returns an array with the same params as another
         """
-        return GPUTensor(other_ary.shape, other_ary.dtype, other_ary.allocator,
+        return GPUTensor(self, other_ary.shape, other_ary.dtype, other_ary.allocator,
                           name=name, rounding=self.round_mode)
 
     def conv_layer(self, dtype,
@@ -582,7 +594,7 @@ class NervanaGPU(object):
         if relu:       flags |= 2
 
         kernel = _get_conv_kernel(self.cubin_path, clss, op, size)
-        params = [grid, block, _get_rand_state(),
+        params = [grid, block, self.stream, _get_rand_state(),
                   C.gpudata, A.gpudata, B.gpudata,
                   alpha, flags ]
         params.extend(args)
@@ -590,18 +602,18 @@ class NervanaGPU(object):
         # Warmup
         if repeat > 1:
             for r in range(max(repeat // 10, 1)):
-                kernel.prepared_call(*params, shared_size=shared)
+                kernel.prepared_async_call(*params, shared_size=shared)
 
         if self.bench or repeat > 1:
             start, end = _get_events()
-            start.record()
+            start.record(stream=self.stream)
 
         for r in range(repeat):
             if zero: C.fill(0.0)
-            kernel.prepared_call(*params, shared_size=shared)
+            kernel.prepared_async_call(*params, shared_size=shared)
 
         if self.bench or repeat > 1:
-            end.record()
+            end.record(stream=self.stream)
             end.synchronize()
             msecs  = end.time_since(start) / repeat
             gflops = layer.flops / (msecs * 1000000.0)
@@ -670,24 +682,24 @@ class NervanaGPU(object):
         b_data = 0 if B is None else B.gpudata
 
         kernel = _get_pool_kernel(self.cubin_path, clss, layer.op)
-        params = [layer.grid, layer.block, I.gpudata, O.gpudata, b_data, mode]
+        params = [layer.grid, layer.block, self.stream, I.gpudata, O.gpudata, b_data, mode]
         params.extend(layer.kernel_args)
 
         # Warmup
         if repeat > 1:
             for r in range(max(repeat // 10, 1)):
-                kernel.prepared_call(*params, shared_size=layer.lut_size)
+                kernel.prepared_async_call(*params, shared_size=layer.lut_size)
 
         if self.bench or repeat > 1:
             start, end = _get_events()
-            start.record()
+            start.record(self.stream)
 
         for r in range(repeat):
             if mode: B.fill(0)
-            kernel.prepared_call(*params, shared_size=layer.lut_size)
+            kernel.prepared_async_call(*params, shared_size=layer.lut_size)
 
         if self.bench or repeat > 1:
-            end.record()
+            end.record(self.stream)
             end.synchronize()
             msecs  = end.time_since(start) / repeat
             print("%7.3f msecs (%s) grid:%s" % (msecs, layer, layer.grid))
@@ -780,7 +792,7 @@ class NervanaGPU(object):
 
         kernel = _get_gemm_kernel(self.cubin_path, clss, op, size)
         params = [
-            (gridA,gridB,1), (threads,1,1), _get_rand_state(),
+            (gridA,gridB,1), (threads,1,1), self.stream, _get_rand_state(),
             A.gpudata, B.gpudata, C.gpudata,
             lda, ldb, ldc, m, n, k,
             alpha, beta, flags ]
@@ -788,17 +800,17 @@ class NervanaGPU(object):
         # Warmup
         if repeat > 1:
             for r in range(max(repeat // 10, 1)):
-                kernel.prepared_call(*params)
+                kernel.prepared_async_call(*params)
 
         if self.bench or repeat > 1:
             start, end = _get_events()
-            start.record()
+            start.record(self.stream)
 
         for r in range(repeat):
-            kernel.prepared_call(*params)
+            kernel.prepared_async_call(*params)
 
         if self.bench or repeat > 1:
-            end.record()
+            end.record(self.stream)
             end.synchronize()
             msecs = end.time_since(start) / repeat
             gflops = (m * n * k * 2.0) / (msecs * 1000000.0)
