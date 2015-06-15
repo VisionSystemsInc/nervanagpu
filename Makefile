@@ -70,11 +70,11 @@ define list_includes
   $(shell sed -rn 's/^<INCLUDE file="(.*)"\/>/\1/p' $(call strip_codes,$(1)))
 endef
 
-WIDTHS := h s  # h == half (16bit), s == single (32bit)
+WIDTHS := h s hs # h == half (16bit), s == single (32bit)
 
 GEMM_ORDERS := _nn _nt _tn
 GEMM_CODES := _ _vec_
-GEMM_SIZES := 128x128 128x64 128x32 128x16
+GEMM_SIZES := 128x128 128x64 128x32 128x16 32x128
 $(foreach w,$(WIDTHS), \
   $(foreach o,$(GEMM_ORDERS), \
     $(foreach c,$(GEMM_CODES), \
