@@ -46,6 +46,10 @@ Our kernels have some additional useful features:
 
 Small optimizations like these can result in significant speed and performance improvements.
 
+## Prerequisites
+
+The latest version of PyCUDA is necessary in order to run **nervanagpu**.  The version provided on PyPI is not up-to-date.  Please obtain the correct release via git from either [GitHub](https://github.com/inducer/pycuda) or the [PyCUDA site](http://git.tiker.net/pycuda.git).
+
 ## Usage
 
 **nervanagpu** includes a factory class `NervanaGPU` and a numpy-like array class `GPUTensor`. Memory layout for tensors and gemm ops is **row-ordered**. Below are examples on how they are used.
@@ -168,7 +172,7 @@ Here is a sample run of `benchmarks/convnet-benchmarks.py` using the networks li
 
 #### Acknowledgements
 
-Thanks to Erich Elsen and Bryan Catanzaro of Baidu, Matthieu Courbariaux and Frédéric Bastien of the Bengio lab, Vincent Vanhoucke of Google, and Soumith Chintala of Facebook for feedback on early versions of this library. We'd also like to thank NVIDIA for generously providing us with several TitanXs for benchmarking.
+Thanks to Erich Elsen and Bryan Catanzaro of Baidu, Matthieu Courbariaux and Frédéric Bastien of the Bengio lab, Vincent Vanhoucke of Google, and Soumith Chintala of Facebook for feedback on early versions of this library. Thanks to Andreas Klöckner for help with interfacing to his PyCUDA library.  We'd also like to thank NVIDIA for generously providing us with several TitanXs for benchmarking.
 
 
 #### References <a name="refs"></a>
