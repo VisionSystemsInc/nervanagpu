@@ -194,7 +194,6 @@
 <CODE>
     our $vec;
     return $vec ? '' : q{
-
 REMAINDER:
 
 <SCHEDULE_BLOCK>
@@ -218,9 +217,9 @@ REMAINDER:
 --:-:-:-:1 @!P3 MOV load0B3, RZ;
 
 
---:-:-:-:1      IADD x65, txb64, 65;
---:-:-:-:1      IADD x66, txb64, 66;
---:-:-:-:1      IADD x67, txb64, 67;
+--:-:-:-:1      IADD x65, txb64, 1;
+--:-:-:-:1      IADD x66, txb64, 2;
+--:-:-:-:1      IADD x67, txb64, 3;
 --:-:-:-:1      ISETP.LT.AND P5, PT, txb64, param_n, PT;
 --:-:-:-:1      ISETP.LT.AND P0, PT, tidBY, k, P5;
 --:-:-:-:1      ISETP.LT.AND P1, PT, x65, param_n, P0;
@@ -290,7 +289,7 @@ REMAINDER:
 --:-:-:-:1 @!P0 MOV load1B4, RZ;
 --:-:-:-:1 @!P1 MOV load1B5, RZ;
 --:-:-:-:1 @!P2 MOV load1B6, RZ;
---:-:-:-:1 @!P3 MOV load1B7, RZ;
+--:-:-:-:0 @!P3 MOV load1B7, RZ;
 
 --:-:-:-:1      ISETP.GT.AND P4, PT, k, 32, P4;
 --:-:-:-:1      ISETP.GT.AND P5, PT, k, 32, P5;
@@ -332,9 +331,25 @@ REMAINDER:
 --:-:2:-:1      LDS.U.128 j1Ay0, [readAs + 4x<1*32  + 0*(128*8 + 32*8) + 00>];
 --:-:2:-:1      LDS.U.128 j1Bx0, [readBs + 4x<1*128 + 0*(128*8 + 32*8) + 32*8>];
 --:-:2:-:1      LDS.U.128 j1Ay4, [readAs + 4x<1*32  + 0*(128*8 + 32*8) + 16>];
+<CODE>
+    our $vec;
+    return $vec ? q{
 --:-:3:-:1  @P5 LDG.E.CI.128 load0B0, [track0B + 4x<00>];
 --:-:3:-:1  @P6 LDG.E.CI.128 load0B4, [track0B + 4x<64>];
 --:-:4:-:1  @P4 LDG.E.CI     load0A0, [track0A];
+    } : q{
+--:-:3:-:1  @P5 LDG.E.CI load0B0, [track0B + 4x<0>];
+--:-:3:-:1  @P5 LDG.E.CI load0B1, [track0B + 4x<1>];
+--:-:3:-:1  @P5 LDG.E.CI load0B2, [track0B + 4x<2>];
+--:-:3:-:1  @P5 LDG.E.CI load0B3, [track0B + 4x<3>];
+--:-:3:-:1  @P6 LDG.E.CI load0B4, [track0B + 4x<64>];
+--:-:3:-:1  @P6 LDG.E.CI load0B5, [track0B + 4x<65>];
+--:-:3:-:1  @P6 LDG.E.CI load0B6, [track0B + 4x<66>];
+--:-:3:-:1  @P6 LDG.E.CI load0B7, [track0B + 4x<67>];
+--:-:4:-:1  @P4 LDG.E.CI.U16 load0A0, [track0A + 2x<0>];
+--:-:4:-:1  @P4 LDG.E.CI.U16 load0A1, [track0A + 2x<1>];
+    };
+</CODE>
 
 LOOP:
 
