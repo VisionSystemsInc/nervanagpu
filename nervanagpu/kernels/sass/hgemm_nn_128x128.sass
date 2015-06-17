@@ -16,7 +16,7 @@
 
 
 <CONSTANT_MAPPING>
-    addr_zero  : 4x<128*8*4 + 0>
+    addr_zero  : 4x<128*8*4>
 
     gridDimA : c[0x0][0x14]
     gridDimB : c[0x0][0x18]
@@ -42,7 +42,7 @@
 
 <REGISTER_MAPPING>
 
-    0-63    ~ tidAX, tidBX, lda, ldb, tid1, tid7, txa, ta, xmad_ta, tb, xmad_tb, dimA, flag
+    64-79   ~ tidAX, tidBX, lda, ldb, tid1, tid7, txa, ta, xmad_ta, tb, xmad_tb, dimA, flag
 
     0-63    : czero<00-63>
 
@@ -89,6 +89,10 @@
 --:-:-:-:1      SHL ldb8, ldb, 4;
 
 --:-:-:-:1      STS.128 [addr_zero], RZ;
+<CODE>
+        join('', map sprintf("--:-:-:-:1      MOV czero%02d, RZ;\n", $_), 0..31) .
+        join('', map sprintf("--:-:-:-:1      LDS.U.128 czero%02d, [addr_zero];\n", $_ * 4), 8..15);
+</CODE>
 
 // Grab a seed for this thread
 // (blkB*gridDimA*256 + blkA*256 + tid) & (1024*256 - 1)
@@ -157,10 +161,6 @@
 --:-:-:-:1      LOP.OR  readBs, readBs, tid7;
 --:-:-:-:1      ISCADD  readBs, readBs, 4x<128*8>, 4;
 </SCHEDULE_BLOCK>
-
-<CODE>
-    return join '', map sprintf("--:-:1:-:1      LDS.U.128 czero%02d, [addr_zero];\n", $_ * 4), 0..15;
-</CODE>
 
 REMAINDER:
 

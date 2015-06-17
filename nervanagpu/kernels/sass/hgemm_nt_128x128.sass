@@ -16,7 +16,7 @@
 
 
 <CONSTANT_MAPPING>
-    addr_zero  : 4x<128*8*4 + 0>
+    addr_zero  : 4x<128*8*4>
     
     gridDimA : c[0x0][0x14]
     gridDimB : c[0x0][0x18]
@@ -42,7 +42,7 @@
 
 <REGISTER_MAPPING>
 
-    0-63    ~ tidX, blk, lda, ldb, tid1, tid7, tid127, txa, txb, ta, xmad_ta, tb, xmad_tb, dimA, flag
+    64-79   ~ tidX, blk, lda, ldb, tid1, tid7, tid127, txa, txb, ta, xmad_ta, tb, xmad_tb, dimA, flag
 
     0-63    : czero<00-63>
 
@@ -91,6 +91,10 @@
 --:-:-:-:1      LOP.AND tid128, tid,  128;
 
 --:-:-:-:1      STS.128 [addr_zero], RZ;
+<CODE>
+        join('', map sprintf("--:-:-:-:1      MOV czero%02d, RZ;\n", $_), 0..31) .
+        join('', map sprintf("--:-:-:-:1      LDS.U.128 czero%02d, [addr_zero];\n", $_ * 4), 8..15);
+</CODE>
 
 // Grab a seed for this thread
 // (blkB*gridDimA*256 + blkA*256 + tid) & (1024*256 - 1)
@@ -122,7 +126,7 @@
 --:-:-:-:1  @P0 LEA      trackX0.CC, ta, param_A[0],     0x1;
 --:-:-:-:1  @P0 LEA.HI.X trackX1,    ta, param_A[1], RZ, 0x1;
 --:-:-:-:1 @!P0 LEA      trackX0.CC, ta, param_B[0],     0x1;
---:-:-:-:0 @!P0 LEA.HI.X trackX1,    ta, param_B[1], RZ, 0x1;
+--:-:-:-:1 @!P0 LEA.HI.X trackX1,    ta, param_B[1], RZ, 0x1;
 
 // writeS = tid127 * 4
 // writeS += 4x<128*8> if tid >= 128
@@ -154,7 +158,7 @@
 04:-:-:-:1      ISCADD  txb, blkB, tidX, 7;
 --:-:-:-:1      XMAD.LO tb, ldb, txb, tidY, xmad_tb;
 --:-:-:-:1      LEA      trackB0.CC, tb, param_B[0], 0x1;
---:-:-:-:0      LEA.HI.X trackB1,    tb, param_B[1], RZ, 0x1;
+--:-:-:-:1      LEA.HI.X trackB1,    tb, param_B[1], RZ, 0x1;
 
 --:-:-:-:1      ISETP.LT.AND P5, PT, txa, param_m, PT;
 --:-:-:-:1      ISETP.LT.AND P6, PT, txb, param_n, PT;
@@ -180,10 +184,6 @@
 --:-:-:-:1      ISCADD  readBs, readBs, 4x<128*8>, 4;
 
 </SCHEDULE_BLOCK>
-
-<CODE>
-    return join '', map sprintf("--:-:1:-:1      LDS.U.128 czero%02d, [addr_zero];\n", $_ * 4), 0..15;
-</CODE>
 
 REMAINDER:
 
