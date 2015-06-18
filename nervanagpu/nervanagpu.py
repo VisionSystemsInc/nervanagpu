@@ -830,6 +830,7 @@ class NervanaGPU(object):
     def reciprocal  (self, a,    out=None): return OpTreeNode.build("div", 1, a, out=out)
 
     def negative    (self, a, out=None): return OpTreeNode.build("neg",  a, None, out=out)
+    def sgn         (self, a, out=None): return OpTreeNode.build("sgn",  a, None, out=out)
     def absolute    (self, a, out=None): return OpTreeNode.build("abs",  a, None, out=out)
     def fabs        (self, a, out=None): return OpTreeNode.build("abs",  a, None, out=out)
 
