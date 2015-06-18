@@ -832,9 +832,25 @@ def call_compound_kernel(rand_state, *args):
 
     # get or create the kernel in the memoize cache
     kernel = _get_compound_kernel(tuple(type_args))
+
+    # if out.backend.bench:
+    #     repeat = out.backend.bench
+    #     start, end = ng._get_events()
+    #     start.record(out.backend.stream)
+    # else:
+    #     repeat = 1
+
+    # for r in range(repeat):
+
     # call the kernel with the number of blocks set as the size of the off-axis
     # Maxwell does well with 32 thread sized blocks, no need to autotune.
     kernel.prepared_async_call((max_shape[1-axis],1,1), (32,1,1), out.backend.stream, *kernel_args)
+
+    # if out.backend.bench:
+    #     end.record(out.backend.stream)
+    #     end.synchronize()
+    #     msecs = end.time_since(start) / repeat
+    #     print("%7.3f msecs (%dx) shape(%d,%d)" % (msecs, repeat, max_shape[0], max_shape[1]))
 
     return out
 

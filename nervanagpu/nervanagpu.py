@@ -456,7 +456,14 @@ class NervanaGPU(object):
 
     def __init__(self, stochastic_round=False, bench=False,
                  cubin_path=os.path.join("kernels", "cubin")):
-        self.round_mode = 1 if stochastic_round else 0
+        """
+        NervanaGPU: the primary interface class and factory for GPUTensors
+
+        stochastic_round: set to desired number of mantissa bits to stochasicaly round to
+                          set to zero to disable stochastic rouding.
+        bench: set to 1 to print out performance data for most kernel calls
+        """
+        self.round_mode = stochastic_round
         self.cubin_path = os.path.join(os.path.dirname(__file__), cubin_path)
         self.bench = bench
         self.stream = None
