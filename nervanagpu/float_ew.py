@@ -249,6 +249,7 @@ _float_ops = {
     "finite"  : (1, _is_finite ),
     "neg"     : (1, "float {0} = -{1};"         ),
     "abs"     : (1, "float {0} = abs({1});"     ),
+    "sgn"     : (1, "float {0} = copysignf(1.0f, {1});"     ),
     "sqrt"    : (1, "float {0} = sqrtf({1});"   ),
     "sqr"     : (1, "float {0} = {1} * {1};"    ),
     "pow"     : (1, "float {0} = powf({1});"    ),
@@ -406,7 +407,7 @@ def _get_compound_kernel(type_args):
                         red_sig.append(a[0])
                     # For tensor or constant, append type and id.
                     # Note that constants have unique ids and will prevent
-                    # duplicate detection.  Need to know diff between contants that
+                    # duplicate detection.  Need to know diff between constants that
                     # can change or are actually static... save for another day.
                     # TODO: this has implications for cached execution plans.
                     else:
