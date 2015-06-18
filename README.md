@@ -48,7 +48,7 @@ Small optimizations like these can result in significant speed and performance i
 
 ## Prerequisites
 
-The latest version of PyCUDA is necessary in order to run **nervanagpu**.  The version provided on PyPI is not up-to-date.  Please obtain the correct release via git from either [GitHub](https://github.com/inducer/pycuda) or the [PyCUDA site](http://git.tiker.net/pycuda.git).
+PyCUDA release 2015.1 is necessary in order to run **nervanagpu**.
 
 ## Usage
 

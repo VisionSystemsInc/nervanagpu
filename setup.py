@@ -37,13 +37,13 @@ class build_py(_build_py):
      
 setup(
       name='nervanagpu',
-      version='0.3.2',
+      version='0.3.3',
       description='Python bindings for Nervana GPU kernels',
       url='https://github.com/nervanasys/nervanagpu',
       author='Nervana Systems',
       license='(see LICENSE document)',
       install_requires=['numpy',
-                        'pycuda',
+                        'pycuda>=2015.1',
                         'pytools'],
       packages = find_packages(),
       package_data=package_data,
