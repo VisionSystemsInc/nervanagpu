@@ -597,7 +597,7 @@ class NervanaGPU(object):
         elif A.dtype.type is np.int8:  op += '_s8'
 
         flags = 0
-        if C.rounding: flags |= 1
+        if C.rounding: flags |= 1 | (C.rounding << 16)
         if relu:       flags |= 2
 
         kernel = _get_conv_kernel(self.cubin_path, clss, op, size)
@@ -794,7 +794,7 @@ class NervanaGPU(object):
                 op += "_vec"
 
         flags = 0
-        if C.rounding: flags |= 1
+        if C.rounding: flags |= 1 | (C.rounding << 16)
         if relu:       flags |= 2
 
         kernel = _get_gemm_kernel(self.cubin_path, clss, op, size)
