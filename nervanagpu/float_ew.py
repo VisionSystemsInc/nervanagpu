@@ -855,3 +855,59 @@ def call_compound_kernel(rand_state, *args):
 
     return out
 
+_fp16_compensated_sum = _common_fp16_to_fp32 + _common_fp32_to_fp16 + r"""
+
+__global__ void fp16_compensated_sum(
+    unsigned short* a_sum, 
+    unsigned short* a_cmp, 
+    const unsigned short* a_add, 
+    int row_strd, int col_strd, int n)
+{
+    const int tid = threadIdx.x;
+    const int bid = blockIdx.x;
+
+    int offset = bid * row_strd + tid * col_strd;
+    int inc    = 32 * col_strd;
+
+    a_sum += offset;
+    a_cmp += offset;
+    a_add += offset;
+
+    for (int i = tid; i < n; i += 32)
+    {
+        float s32 = fp16_to_fp32(__ldg((const unsigned short*)a_sum));
+        float c32 = fp16_to_fp32(__ldg((const unsigned short*)a_cmp));
+        float a32 = fp16_to_fp32(__ldg(a_add));
+        a_add += inc;
+
+        // Adjust amount to add by previous compensation
+        float y32 = a32 - c32;
+
+        // Do the accumulation and truncate to the storage type
+        unsigned short t16 = fp32_to_fp16(s32 + y32);
+
+        // Convert accumulation back to fp32 so we can do more math on it
+        float t32 = fp16_to_fp32(t16);
+
+        // recover the low order bits that were lost in the truncation
+        unsigned short c16 = fp32_to_fp16((t32 - s32) - y32);
+
+        *a_sum = t16;
+        *a_cmp = c16;
+
+        a_sum += inc;
+        a_cmp += inc;
+    }
+}
+"""
+
+@context_dependent_memoize
+def _get_compensated_sum_kernel():
+
+    module = SourceModule(_fp16_compensated_sum)
+    kernel = module.get_function("fp16_compensated_sum")
+    kernel.prepare("PPPiii")
+    return kernel
+
+
+

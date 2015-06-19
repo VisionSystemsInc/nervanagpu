@@ -16,10 +16,11 @@ import os
 import sys
 import numpy as np
 import pycuda.driver as drv
+from math import sqrt
 from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
-from .float_ew import call_compound_kernel
+from .float_ew import call_compound_kernel, _get_compensated_sum_kernel
 from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 
 if sys.version_info >= (3, 0):
@@ -70,6 +71,17 @@ class GPUTensor(object):
         self.is_trans   = is_trans
         self.name       = name
         self.rounding   = rounding
+
+        # calculate dims that are efficient for elementwise ops
+        # (that don't involve a reduction or broadcast along an axis)
+        sq_size = int(sqrt(size))
+        while sq_size > 0:
+            if size % sq_size == 0:
+                break
+            sq_size -= 1
+
+        self.shape_ew   = (sq_size, size // sq_size)
+        self.strides_ew = _contiguous_strides(dtype.itemsize, self.shape_ew)
 
         if gpudata is None:
             if size:
@@ -503,6 +515,13 @@ class NervanaGPU(object):
         return GPUTensor(self, other_ary.shape, other_ary.dtype, other_ary.allocator,
                           name=name, rounding=self.round_mode)
 
+    def zeros_like(self, other_ary, name=None):
+        """
+        Returns an array with the same params as another
+        """
+        return GPUTensor(self, other_ary.shape, other_ary.dtype, other_ary.allocator,
+                          name=name, rounding=self.round_mode)._assign(0)
+
     def conv_layer(self, dtype,
             N, C, K,
             D=1, H=1, W=1,
@@ -827,6 +846,17 @@ class NervanaGPU(object):
                 return gflops
 
         return C
+
+    def compensated_sum(self, sum_tensor, cmp_tensor, add_tensor):
+
+        shape   = sum_tensor.shape_ew
+        strides = sum_tensor.strides_ew
+        kernel  = _get_compensated_sum_kernel()
+
+        kernel.prepared_async_call(
+            (shape[0],1,1), (32,1,1), self.stream,
+            sum_tensor.gpudata, cmp_tensor.gpudata, add_tensor.gpudata,
+            strides[0]//2, strides[1]//2, shape[1])
 
     def add         (self, a, b, out=None): return OpTreeNode.build("add", a, b, out=out)
     def subtract    (self, a, b, out=None): return OpTreeNode.build("sub", a, b, out=out)
