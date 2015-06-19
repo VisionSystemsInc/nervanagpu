@@ -18,8 +18,12 @@ import pycuda.driver as drv
 from nervanagpu      import NervanaGPU
 from pycuda.autoinit import context
 from operator        import mul
+import sys
 
-print context.get_device().name()
+if sys.version_info >= (3, 0):
+    from functools import reduce
+
+print(context.get_device().name())
 
 np.set_printoptions(threshold=8193, linewidth=600, formatter={'int':lambda x: "%10d" % x,'float':lambda x: "% .0f" % x})
 
@@ -128,7 +132,7 @@ def pixel_indices(mt, pr, qs):
 # numpy convolution implementation
 
 # devA = devO.get().astype(np.float32)
-# print devA[:,0,0,0,:]
+# print(devA[:,0,0,0,:])
 # exit()
 
 if cpu:
@@ -150,8 +154,8 @@ if cpu:
                 qs = q*str_w - pad_w
 
                 idx = pixel_indices(mt, pr, qs)
-                #print "mpq(%d,%d,%d)" % (m,p,q)
-                #print np.array(idx)
+                #print("mpq(%d,%d,%d)" % (m,p,q))
+                #print(np.array(idx))
 
                 if "fprop"  in ops:
                     cpuO[:,m,p,q,:] = np.dot( cpuF.T,      cpuI[idx,:]       )
@@ -178,38 +182,38 @@ if cpu:
         maxval = abs(cpuA.max())
         maxdif = abs(difA.max())
         #difA = np.absolute(cpuA - devA)
-        print op, "diff max: %.4f %.4f %.4f\n" % (maxdif, maxval, maxdif / maxval)
+        print(op, "diff max: %.4f %.4f %.4f\n" % (maxdif, maxval, maxdif / maxval))
 
         for c in range(difA.shape[0]):
             for n in range(difA.shape[4]):
                 if abs(difA[c,0,:,:,n].max()) / maxval >= 0.01:
 
-                    print difA[c,0,:,:,n].shape
+                    print(difA[c,0,:,:,n].shape)
 
                     pq = np.argmax(difA[c,0,:,:,n])
 
                     p = pq // w
                     q = pq % w
 
-                    print p, q
+                    print(p, q)
 
-                    print cpuA[:,0,p,q,:], "\n"
-                    print devA[:,0,p,q,:], "\n"
-                    print difA[:,0,p,q,:]
+                    print(cpuA[:,0,p,q,:], "\n")
+                    print(devA[:,0,p,q,:], "\n")
+                    print(difA[:,0,p,q,:])
 
-                    # print difA[:,0,y,x,:], "\n"
-                    # print cpuA[c,0,:,:,n], "\n"
-                    # print devA[c,0,:,:,n], "\n"
-                    # print difA[c,0,:,:,n], "\n"
-                    # print difA[c+1,0,:,:,n], "\n"
-                    # print difA[c,0,:,:,n+1], "\n"
-                    # print c, n, difA[c,0,:,:,n].max()
+                    # print(difA[:,0,y,x,:], "\n")
+                    # print(cpuA[c,0,:,:,n], "\n")
+                    # print(devA[c,0,:,:,n], "\n")
+                    # print(difA[c,0,:,:,n], "\n")
+                    # print(difA[c+1,0,:,:,n], "\n")
+                    # print(difA[c,0,:,:,n+1], "\n")
+                    # print(c, n, difA[c,0,:,:,n].max())
                     exit()
 
-        # print devA[0,0,::4,::4,0], "\n"
-        # print cpuA[0,0,::4,::4,0], "\n"
-        # print difA[0,0,::4,::4,0], "\n"
-        # print difA[1,0,::4,::4,0], "\n"
-        # print difA[2,0,::4,::4,0], "\n"
+        # print(devA[0,0,::4,::4,0], "\n")
+        # print(cpuA[0,0,::4,::4,0], "\n")
+        # print(difA[0,0,::4,::4,0], "\n")
+        # print(difA[1,0,::4,::4,0], "\n")
+        # print(difA[2,0,::4,::4,0], "\n")
 
 

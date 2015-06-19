@@ -55,6 +55,7 @@
     param_shift_RS  : c[0x0][0x1d0]
     param_magic_RST : c[0x0][0x1d4]
     param_shift_RST : c[0x0][0x1d8]
+    param_overlap   : c[0x0][0x1dc]
 </CONSTANT_MAPPING>
 
 <REGISTER_MAPPING>
@@ -111,7 +112,7 @@
 --:-:-:-:1      LEA      Out0.CC, iOut, param_O[0],     2;
 --:-:-:-:1      LEA.HI.X Out1,    iOut, param_O[1], RZ, 2;
 
---:-:5:-:1  @P5 LDG.E.CI bprop, [Out];
+--:-:-:-:1  @P5 LDG.E.CI bprop, [Out];
 
 --:-:-:-:1      ISETP.GT.AND P0, PT, JRST, RZ, PT;
 --:-:-:-:1      ISETP.GT.AND P1, PT, JRST, 1,  PT;
@@ -213,6 +214,7 @@ LUT_LOOP:
 
 END_SETUP:
 
+--:-:-:-:1      ISETP.NE.AND P4, PT, RZ, param_overlap, PT;
 --:-:-:-:1      MOV32I max, 0xff7fffff; // -FLT_MAX
 --:-:-:-:1      MOV maxIdx, RZ;
 --:-:-:-:1      MOV lutOffset, RZ;
@@ -277,11 +279,26 @@ LOOP:
 --:-:-:-:5  @P0 BRA.U LOOP;
 
 // fprop
---:-:-:-:1 @!P5 STG.E.CG [Out], max;
+--:-:-:-:5  @P5 BRA.U BPROP;
+
+--:-:-:-:1      STG.E.CG [Out], max;
+--:-:-:-:5      BRA.U EXIT;
+
+BPROP:
 
 // bprop
---:-:-:-:6  @P5 IADD   Back0.CC, Back0, maxIdx;
---:-:-:-:2  @P5 IADD.X Back1,    Back1, RZ;
-10:-:-:-:1  @P5 STG.E.CG [Back0], bprop;
+--:-:-:-:6      IADD   Back0.CC, Back0, maxIdx;
+--:-:-:-:0      IADD.X Back1,    Back1, RZ;
+
+--:-:-:-:5  @P4 BRA.U OVERLAP;
+
+--:-:-:-:1      STG.E.CG [Back0], bprop;
+--:-:-:-:5      BRA.U EXIT;
+
+OVERLAP:
+
+--:-:-:-:1      RED.E.ADD.F32.FTZ.RN [Back0], bprop;
+
+EXIT:
 
 --:-:-:-:5      EXIT;

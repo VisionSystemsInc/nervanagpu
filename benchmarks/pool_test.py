@@ -19,23 +19,23 @@ from nervanagpu      import NervanaGPU
 from pycuda.autoinit import context
 from operator        import mul
 
-print context.get_device().name()
+print(context.get_device().name())
 
 np.set_printoptions(threshold=8193, linewidth=600, formatter={'int':lambda x: "%10d" % x,'float':lambda x: "% .3f" % x})
 
-dtype  = np.float16
+dtype  = np.float32
 cpu    = 1
 repeat = 1
 
 ng = NervanaGPU(stochastic_round=False, bench=True)
 
-pool = ng.pool_layer(
+pool = ng.pool_layer(dtype,
     "max",
-    64,         # N
-    64,1,64,64, # C,D,H,W
-    4,1,2,2,    # J,T,R,S
+    32,         # N
+    32,1,32,32, # C,D,H,W
+    2,1,3,3,    # J,T,R,S
     0,0,0,0,    # padding
-    4,1,2,2)    # strides
+    2,1,2,2)    # strides
 
 dimI = pool.dimI
 dimO = pool.dimO
@@ -47,7 +47,7 @@ def slicable(dim, pad=0):
     return (dim0, dim[-1])
 
 # cpu input arrays
-cpuI = np.random.uniform(0.0, 9.4, slicable(dimI,1)).astype(np.float16).astype(np.float32)
+cpuI = np.random.uniform(0.0, 1.0, slicable(dimI,1)).astype(np.float16).astype(np.float32)
 
 # zero pad the last row of cpu input for the sake of numpy
 if pool.op == "max":
@@ -137,7 +137,7 @@ if cpu:
 
                         # There's probably a more elegant numpy way to do this..
                         for n in range(N):
-                            cpuB[idx[b_idx[n]],n] = cpuO[k,m,p,q,n]
+                            cpuB[idx[b_idx[n]],n] += cpuO[k,m,p,q,n]
 
                     # bprop not implemented yet
                     elif op == "avg":
@@ -150,35 +150,35 @@ if cpu:
     cpuI = cpuI[:-1,:].reshape(dimI)
     cpuB = cpuB[:-1,:].reshape(dimI)
 
-    #print cpuI[1,0,:,:,0], "\n"
-    #print cpuO[1,0,:,:,0], "\n"
-    # print cpuB[0,0,:,:,0], "\n"
+    #print(cpuI[1,0,:,:,0], "\n")
+    #print(cpuO[1,0,:,:,0], "\n")
+    # print(cpuB[0,0,:,:,0], "\n")
 
     devO = devO.get().astype(np.float32)
     devB = devB.get().astype(np.float32)
 
-    #print devO[1,0,:,:,0], "\n"
-    # print devB[0,0,:,:,0], "\n"
+    #print(devO[1,0,:,:,0], "\n")
+    # print(devB[0,0,:,:,0], "\n")
 
     difO = np.absolute(cpuO - devO)
-    print "difO max: ", difO.max(), "\n"
+    print("difO max: ", difO.max())
 
     difB = np.absolute(cpuB - devB)
-    print "difB max: ", difB.max(), "\n"
+    print("difB max: ", difB.max())
 
     # for c in range(C):
     #     for n in range(N):
     #         if difB[c,0,:,:,n].max() > 1:
-    #             print cpuI[c,0,:,:,n], "\n"
-    #             print cpuB[c,0,:,:,n], "\n"
-    #             print devB[c,0,:,:,n], "\n"
-    #             print difB[c,0,:,:,n], "\n"
-    #             print c, n
+    #             print(cpuI[c,0,:,:,n], "\n")
+    #             print(cpuB[c,0,:,:,n], "\n")
+    #             print(devB[c,0,:,:,n], "\n")
+    #             print(difB[c,0,:,:,n], "\n")
+    #             print(c, n)
 
 
-    # print difB
-    # print np.argmax(difB) #[0,0,:,:,0], "\n"
-    # print "difB max: ", difB.max(), "\n"
+    # print(difB)
+    # print(np.argmax(difB) #[0,0,:,:,0], "\n")
+    # print("difB max:", difB.max(), "\n")
     # for op, devA, cpuA in (
     #     ("fprop",devO,cpuO),
     #     ("bprop",devB,cpuB[:-1,:].reshape(dimI)),
@@ -189,10 +189,10 @@ if cpu:
     #     devA = devA.get().astype(np.float32)
 
     #     difA = np.absolute(cpuA - devA)
-    #     print op, "diff max: ", difA.max(), "\n"
+    #     print(op, "diff max:", difA.max(), "\n")
 
-        # print devA[0,0,::4,::4,0], "\n"
-        # print cpuA[0,0,::4,::4,0], "\n"
-        # print difA[0,0,::4,::4,0], "\n"
-        # print difA[1,0,::4,::4,0], "\n"
-        # print difA[2,0,::4,::4,0], "\n"
+        # print(devA[0,0,::4,::4,0], "\n")
+        # print(cpuA[0,0,::4,::4,0], "\n")
+        # print(difA[0,0,::4,::4,0], "\n")
+        # print(difA[1,0,::4,::4,0], "\n")
+        # print(difA[2,0,::4,::4,0], "\n")

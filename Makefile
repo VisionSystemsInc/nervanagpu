@@ -45,7 +45,7 @@ define op_template
   ifneq ("$(wildcard $(CUSRC_DIR)/$(2)$(1)$(3)$(4)$(5).cu)","")
     $(1)_OPS += $(addprefix $(CUBIN_DIR)/, \
                   $(addsuffix .cubin,$(2)$(1)$(3)$(4)$(5)))
-    ifneq ($(filter $(3),_bprop _updat),)
+    ifneq ($(filter $(3),_bprop _updat _max),)
       ifeq ($(2),h)
         NVCCFLAGS_$(2)$(1)$(3)$(4)$(5) := -arch sm_52
       else
@@ -70,11 +70,11 @@ define list_includes
   $(shell sed -rn 's/^<INCLUDE file="(.*)"\/>/\1/p' $(call strip_codes,$(1)))
 endef
 
-WIDTHS := h s  # h == half (16bit), s == single (32bit)
+WIDTHS := h s hs # h == half (16bit), s == single (32bit)
 
 GEMM_ORDERS := _nn _nt _tn
 GEMM_CODES := _ _vec_
-GEMM_SIZES := 128x128 128x64 128x32 128x16
+GEMM_SIZES := 128x128 128x64 128x32 128x16 32x128
 $(foreach w,$(WIDTHS), \
   $(foreach o,$(GEMM_ORDERS), \
     $(foreach c,$(GEMM_CODES), \

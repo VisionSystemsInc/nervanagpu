@@ -33,7 +33,7 @@ for size in (small,medium,big): #  small, medium, big
         for n in (size):
             for op in ("tn","nn","nt"): # "tn","nn","nt",
                 for k in size:
-                    print "op,M,N,K: ", op, m, n, k
+                    print("op,M,N,K: ", op, m, n, k)
 
                     dimA = (m,k) if op[0] == 'n' else (k,m)
                     dimB = (k,n) if op[1] == 'n' else (n,k)
@@ -61,15 +61,15 @@ for size in (small,medium,big): #  small, medium, big
                     cpuD = devC.get()
                     diff = np.absolute(cpuC - cpuD)
                     max_diff = diff.max()
-                    print max_diff, cpuD.max()
+                    print(max_diff, cpuD.max())
                     if max_diff > 0.1 or max_diff != max_diff:
-                        #print m, n, k, max_diff
-                        print cpuD[::max(m//16,1),::max(n//16,1)]
-                        print cpuC[::max(m//16,1),::max(n//16,1)]
-                        print diff[::max(m//16,1),::max(n//16,1)]
+                        #print(m, n, k, max_diff)
+                        print(cpuD[::max(m//16,1),::max(n//16,1)])
+                        print(cpuC[::max(m//16,1),::max(n//16,1)])
+                        print(diff[::max(m//16,1),::max(n//16,1)])
                         exit()
 
-                    # print max_diff, diff.min(), np.sum(cpuC) - np.sum(cpuD)
+                    # print(max_diff, diff.min(), np.sum(cpuC) - np.sum(cpuD))
 
 
 

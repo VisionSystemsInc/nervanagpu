@@ -18,7 +18,7 @@ import pycuda.driver   as drv
 from pycuda.autoinit   import context
 from nervanagpu        import NervanaGPU
 from nervanagpu.layers import DataLayer, ConvLayer, PoolLayer, FullLayer
-print context.get_device().name()
+print(context.get_device().name())
 
 # Compare results here:
 # https://github.com/soumith/convnet-benchmarks
@@ -186,9 +186,9 @@ for net in ("Alexnet","Overfeat","VGG",):
         network = networks[net]
         name    = "%s (dtype=%s, N=%d)" % (net, np.dtype(dtype).name, network[0]["N"])
 
-        print "------------------------------------------------"
-        print "Benchmarking: ", name
-        print "------------------------------------------------"
+        print("------------------------------------------------")
+        print("Benchmarking:", name)
+        print("------------------------------------------------")
 
         layers = []
         prev_layer = None
@@ -239,7 +239,7 @@ for net in ("Alexnet","Overfeat","VGG",):
                 max_delta_layer = layer
 
         # for layer in sorted(layers, key=lambda l: l.sizeO, reverse=True):
-        #     print "%d %s" % (layer.sizeO, layer)
+        #     print("%d %s" % (layer.sizeO, layer))
 
         # Init shared buffers (assumes consistent dtype for now)
         shared_deltas[0] = ng.empty(max_delta_layer.dimO2,  dtype=max_delta_layer.dtype)
@@ -250,7 +250,7 @@ for net in ("Alexnet","Overfeat","VGG",):
         delta = False
         for layer in layers:
 
-            print layer
+            print(layer)
 
             # Intitalize buffers.  Alernate shared delta buffer.
             # One layer can't have the same buffer for both error in and error out.
@@ -264,7 +264,8 @@ for net in ("Alexnet","Overfeat","VGG",):
             delta = not delta
 
         remain, total = drv.mem_get_info()
-        print "%.3fGB of %.3fGB Allocated (%.3fGB Remaining)" % ((total-remain)/1024.**3, total/1024.**3, remain/1024.**3)
+        print("%.3fGB of %.3fGB Allocated (%.3fGB Remaining)" %
+              ((total-remain)/1024.**3, total/1024.**3, remain/1024.**3))
 
         # give the first layer some data
         layers[0].init_data(np.random.uniform(0.0, 1.0, layers[0].dimO2))
@@ -278,7 +279,7 @@ for net in ("Alexnet","Overfeat","VGG",):
             if layer.weights is not None:
                 mean = layer.get_activation_mean()
                 scale = .5 #if prev_layer is None else prev_layer.reduction_factor()
-                print "Scale weights: %.3f (%.3f) %s" % (scale/mean, scale, layer)
+                print("Scale weights: %.3f (%.3f) %s" % (scale/mean, scale, layer))
                 layer.weights *= scale/mean
                 layer.fprop()
 
@@ -306,12 +307,14 @@ for net in ("Alexnet","Overfeat","VGG",):
                 layer.fprop()
                 flops += layer.flops
                 if print_stats:
-                    print "fprop:%8.3f mean %9.3f max %s" % (layer.get_activation_mean(), layer.get_activation_max(), layer)
+                    print("fprop:%8.3f mean %9.3f max %s" %
+                          (layer.get_activation_mean(), layer.get_activation_max(), layer))
 
             end.record()
             end.synchronize()
             msecs = end.time_since(start)
-            print "fprop(%2d): %8.3f msecs %8.3f gflops" % (loop, msecs, flops / (msecs * 1000000.0))
+            print("fprop(%2d): %8.3f msecs %8.3f gflops" %
+                  (loop, msecs, flops / (msecs * 1000000.0)))
             if loop > 0:
                 fprop_time  += msecs
                 fprop_flops += flops
@@ -332,36 +335,38 @@ for net in ("Alexnet","Overfeat","VGG",):
                 #if type(layer) is PoolLayer:
                 #set_trace()
                 if print_stats:
-                    print "bprop:%8.3f mean %9.3f max %s" % (layer.get_delta_mean(),  layer.get_delta_max(), layer)
+                    print("bprop:%8.3f mean %9.3f max %s" %
+                          (layer.get_delta_mean(),  layer.get_delta_max(), layer))
                     if layer.weights is not None:
                         up_mean, up_max = (layer.get_update_mean(), layer.get_update_max())
                         wt_mean, wt_max = (layer.get_weight_mean(), layer.get_weight_max())
                         rt_mean, rt_max = (0.0001 * up_mean/wt_mean, 0.0001 * up_max/wt_max)
-                        print "updat:%8.3f mean %9.3f max %s" % (up_mean, up_max, layer)
-                        print "weigh:%8.3f mean %9.3f max" % (wt_mean, wt_max)
-                        print "ratio:%8.3f mean %9.3f max" % (rt_mean, rt_max)
+                        print("updat:%8.3f mean %9.3f max %s" % (up_mean, up_max, layer))
+                        print("weigh:%8.3f mean %9.3f max" % (wt_mean, wt_max))
+                        print("ratio:%8.3f mean %9.3f max" % (rt_mean, rt_max))
 
             end.record()
             end.synchronize()
             msecs = end.time_since(start)
-            print "bprop(%2d): %8.3f msecs %8.3f gflops" % (loop, msecs, flops / (msecs * 1000000.0))
+            print("bprop(%2d): %8.3f msecs %8.3f gflops" %
+                  (loop, msecs, flops / (msecs * 1000000.0)))
             if loop > 0:
                 bprop_time  += msecs
                 bprop_flops += flops
 
         if loops > 0:
 
-            print "---------------------------------------------"
-            print name, " Results:"
-            print "---------------------------------------------"
-            print "Avg(%d) fprop: %8.3f msecs %.3f gflops" % (
-                loops, fprop_time/loops, fprop_flops / (fprop_time * 1000000.0))
+            print("---------------------------------------------")
+            print(name, "Results:")
+            print("---------------------------------------------")
+            print("Avg(%d) fprop: %8.3f msecs %.3f gflops" %
+                  (loops, fprop_time/loops, fprop_flops / (fprop_time * 1000000.0)))
 
-            print "Avg(%d) bprop: %8.3f msecs %.3f gflops" % (
-                loops, bprop_time/loops, bprop_flops / (bprop_time * 1000000.0))
+            print("Avg(%d) bprop: %8.3f msecs %.3f gflops" %
+                  (loops, bprop_time/loops, bprop_flops / (bprop_time * 1000000.0)))
 
             fprop_time  += bprop_time
             fprop_flops += bprop_flops
 
-            print "Avg(%d) total: %8.3f msecs %.3f gflops\n\n" % (
-                loops, fprop_time/loops, fprop_flops / (fprop_time * 1000000.0))
+            print("Avg(%d) total: %8.3f msecs %.3f gflops\n\n" %
+                  (loops, fprop_time/loops, fprop_flops / (fprop_time * 1000000.0)))

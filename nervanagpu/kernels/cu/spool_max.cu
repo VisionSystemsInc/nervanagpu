@@ -54,7 +54,8 @@ __global__ void spool_max
     int param_magic_RS,
     int param_shift_RS,
     int param_magic_RST,
-    int param_shift_RST
+    int param_shift_RST,
+    int param_overlap
 )
 {
     param_O[threadIdx.x] = threadIdx.x;

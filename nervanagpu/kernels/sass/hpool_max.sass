@@ -5,9 +5,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -55,6 +55,7 @@
     param_shift_RS  : c[0x0][0x1d0]
     param_magic_RST : c[0x0][0x1d4]
     param_shift_RST : c[0x0][0x1d8]
+    param_overlap   : c[0x0][0x1dc]
 </CONSTANT_MAPPING>
 
 <REGISTER_MAPPING>
@@ -111,7 +112,7 @@
 --:-:-:-:1      LEA      Out0.CC, iOut, param_O[0],     1;
 --:-:-:-:1      LEA.HI.X Out1,    iOut, param_O[1], RZ, 1;
 
---:-:5:-:1  @P5 LDG.E.CI.S16 bprop, [Out];
+--:-:5:-:1  @P5 LDG.E.CI.U16 bprop, [Out];
 
 --:-:-:-:1      ISETP.GT.AND P0, PT, JRST, RZ, PT;
 --:-:-:-:1      ISETP.GT.AND P1, PT, JRST, 1,  PT;
@@ -143,9 +144,9 @@
 --:-:-:-:1      MOV HWN,        param_HWN;
 --:-:-:-:1      MOV DHWN,       param_DHWN;
 
-// kj = k * str_j - pad_j 
-// mt = m * str_d - pad_d 
-// pr = p * str_h - pad_h 
+// kj = k * str_j - pad_j
+// mt = m * str_d - pad_d
+// pr = p * str_h - pad_h
 // qs = q * str_w - pad_w
 --:-:-:-:1      VMAD.U16.U16 kj, k, str_j, -pad_j;
 --:-:-:-:1      VMAD.U16.U16 mt, m, str_d, -pad_d;
@@ -213,6 +214,7 @@ LUT_LOOP:
 
 END_SETUP:
 
+--:-:-:-:1      ISETP.NE.AND P4, PT, RZ, param_overlap, PT;
 --:-:-:-:1      MOV32I max, 0xff7fffff; // -FLT_MAX
 --:-:-:-:1      MOV maxIdx, RZ;
 --:-:-:-:1      MOV lutOffset, RZ;
@@ -234,19 +236,19 @@ LOOP:
 
 --:-:-:-:6      IADD   load0In0.CC, In0, inOffset0;
 --:-:-:-:2      IADD.X load0In1,    In1, RZ;
---:-:1:-:1  @P0 LDG.E.CI.S16 load0, [load0In];
+--:-:1:-:1  @P0 LDG.E.CI.U16 load0, [load0In];
 
 --:-:-:-:6  @P1 IADD   load1In0.CC, In0, inOffset1;
 --:-:-:-:2  @P1 IADD.X load1In1,    In1, RZ;
---:-:2:-:1  @P1 LDG.E.CI.S16 load1, [load1In];
+--:-:2:-:1  @P1 LDG.E.CI.U16 load1, [load1In];
 
 --:-:-:-:6  @P2 IADD   load2In0.CC, In0, inOffset2;
 --:-:-:-:2  @P2 IADD.X load2In1,    In1, RZ;
---:-:3:-:1  @P2 LDG.E.CI.S16 load2, [load2In];
+--:-:3:-:1  @P2 LDG.E.CI.U16 load2, [load2In];
 
 --:-:-:-:6  @P3 IADD   load3In0.CC, In0, inOffset3;
 --:-:-:-:2  @P3 IADD.X load3In1,    In1, RZ;
---:-:4:-:1  @P3 LDG.E.CI.S16 load3, [load3In];
+--:-:4:-:1  @P3 LDG.E.CI.U16 load3, [load3In];
 
 --:-:-:-:1      IADD jrst_0, jrst_0, 4;
 --:-:-:-:1      IADD jrst_1, jrst_1, 4;
@@ -283,12 +285,36 @@ LOOP:
 
 --:-:1:-:1 @!P5 F2F.F16.F32 max, max;
 
-// bprop
---:-:-:-:6  @P5 IADD   Back0.CC, Back0, maxIdx;
---:-:-:-:2  @P5 IADD.X Back1,    Back1, RZ;
-10:-:-:-:1  @P5 STG.E.CG.S16 [Back0], bprop;
+// P0 = Back0 & 2
+--:-:-:-:1      LOP.AND.NZ P0, RZ, Back0, 0x2;
 
 // fprop
-01:-:-:-:1 @!P5 STG.E.CG.S16 [Out], max;
+--:-:-:-:5  @P5 BRA.U BPROP;
+
+01:-:-:-:1      STG.E.CG.U16 [Out], max;
+--:-:-:-:5      BRA.U EXIT;
+
+BPROP:
+
+// bprop
+--:-:-:-:6      IADD   Back0.CC, Back0, maxIdx;
+--:-:-:-:0      IADD.X Back1,    Back1, RZ;
+
+--:-:-:-:5  @P4 BRA.U OVERLAP;
+
+--:-:-:-:1      STG.E.CG.U16 [Back0], bprop;
+
+--:-:-:-:5      BRA.U EXIT;
+
+OVERLAP:
+
+--:-:-:-:1 @!P0 LOP32I.AND bprop, bprop, 0x0000ffff;
+--:-:-:-:1  @P0 SHL        bprop, bprop, 16;
+--:-:-:-:2  @P0 LOP32I.AND Back0, Back0, 0xfffffffc;
+
+--:-:-:-:1      RED.E.ADD.F16x2.FTZ.RN [Back0], bprop;
+
+
+EXIT:
 
 --:-:-:-:5      EXIT;

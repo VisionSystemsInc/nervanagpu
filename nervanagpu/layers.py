@@ -17,6 +17,10 @@ import pycuda.driver as drv
 from pycuda.tools import context_dependent_memoize
 from operator import mul
 from math     import ceil
+import sys
+
+if sys.version_info >= (3, 0):
+    from functools import reduce
 
 class Layer(object):
     def __init__(self, lib, dtype, N):
@@ -407,6 +411,14 @@ class PoolLayer(Layer):
         if str_h is None: str_h = R
         if str_w is None: str_w = S
 
+        if str_j < J or str_d < T or str_h < R or str_w < S:
+            self.overlap =  ceil(float(J)/str_j) * \
+                            ceil(float(T)/str_d) * \
+                            ceil(float(R)/str_h) * \
+                            ceil(float(S)/str_w)
+        else:
+            self.overlap = 0.0
+
         # Compute the output dimensions
         K = int(ceil(float(C - J + 1 + 2*pad_j) / str_j))
         M = int(ceil(float(D - T + 1 + 2*pad_d) / str_d))
@@ -463,7 +475,7 @@ class PoolLayer(Layer):
             P, magic_P, QN, PQN, MPQN,
             pad_j, pad_d, pad_h, pad_w,
             str_j, str_d, str_h, str_w,
-            S, RS, RST, JRST, magic_S, magic_RS, magic_RST])
+            S, RS, RST, JRST, magic_S, magic_RS, magic_RST, self.overlap])
 
         # precompute grid dimensions
         self.grid  = (Q, PM, K)

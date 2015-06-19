@@ -249,6 +249,7 @@ _float_ops = {
     "finite"  : (1, _is_finite ),
     "neg"     : (1, "float {0} = -{1};"         ),
     "abs"     : (1, "float {0} = abs({1});"     ),
+    "sgn"     : (1, "float {0} = copysignf(1.0f, {1});"     ),
     "sqrt"    : (1, "float {0} = sqrtf({1});"   ),
     "sqr"     : (1, "float {0} = {1} * {1};"    ),
     "pow"     : (1, "float {0} = powf({1});"    ),
@@ -406,7 +407,7 @@ def _get_compound_kernel(type_args):
                         red_sig.append(a[0])
                     # For tensor or constant, append type and id.
                     # Note that constants have unique ids and will prevent
-                    # duplicate detection.  Need to know diff between contants that
+                    # duplicate detection.  Need to know diff between constants that
                     # can change or are actually static... save for another day.
                     # TODO: this has implications for cached execution plans.
                     else:
@@ -689,7 +690,6 @@ def call_compound_kernel(rand_state, *args):
     kernel_args = [ rand_state, ]
     type_args   = []
     shape_stack = []
-
     # Apply reduction constraints and determine thread axis
     # Blocks will be allocated counter to this axis
     reduction = False
@@ -834,9 +834,24 @@ def call_compound_kernel(rand_state, *args):
     # get or create the kernel in the memoize cache
     kernel = _get_compound_kernel(tuple(type_args))
 
+    # if out.backend.bench:
+    #     repeat = out.backend.bench
+    #     start, end = ng._get_events()
+    #     start.record(out.backend.stream)
+    # else:
+    #     repeat = 1
+
+    # for r in range(repeat):
+
     # call the kernel with the number of blocks set as the size of the off-axis
     # Maxwell does well with 32 thread sized blocks, no need to autotune.
-    kernel.prepared_call((max_shape[1-axis],1,1), (32,1,1), *kernel_args)
+    kernel.prepared_async_call((max_shape[1-axis],1,1), (32,1,1), out.backend.stream, *kernel_args)
+
+    # if out.backend.bench:
+    #     end.record(out.backend.stream)
+    #     end.synchronize()
+    #     msecs = end.time_since(start) / repeat
+    #     print("%7.3f msecs (%dx) shape(%d,%d)" % (msecs, repeat, max_shape[0], max_shape[1]))
 
     return out
 

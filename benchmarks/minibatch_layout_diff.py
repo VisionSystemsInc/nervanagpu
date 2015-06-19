@@ -21,7 +21,7 @@ from nervanagpu import NervanaGPU
 from pycuda.autoinit import context
 from scikits.cuda import cublas
 
-print context.get_device().name()
+print(context.get_device().name())
 
 ng = NervanaGPU(stochastic_round=False, bench=True)
 
@@ -53,7 +53,7 @@ def cublas_dot(op, A, B, C, repeat=1, warmup=False):
     end.synchronize()
     msecs = end.time_since(start) / repeat
     gflops = (m * n * k * 2.0) / (msecs * 1000000.0)
-    print "%7.3f msecs %4.0f gflops (%s: %d,%d,%d)" % (msecs,gflops,op,m,n,k)
+    print("%7.3f msecs %4.0f gflops (%s: %d,%d,%d)" % (msecs,gflops,op,m,n,k))
 
     return msecs
 
@@ -89,7 +89,7 @@ for K, C, N in ((3072,3072,32),):
 
         total += cublas_dot(op, devA, devB, devC, repeat=repeat, warmup=True)
 
-    print "N2 Total: ", total
+    print("N2 Total: ", total)
     total = 0
 
     for op,  dimA,  dimB,  dimC in (
@@ -107,6 +107,6 @@ for K, C, N in ((3072,3072,32),):
 
         total += cublas_dot(op, devA, devB, devC, repeat=repeat)
 
-    print "N1 Total: ", total
+    print("N1 Total: ", total)
 
-    print "--------------------------------------------------------------------------------"
+    print("--------------------------------------------------------------------------------")
