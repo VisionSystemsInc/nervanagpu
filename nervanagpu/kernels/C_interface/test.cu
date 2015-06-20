@@ -25,7 +25,23 @@
 #include "nervana_c_api.h"
 
 void test_hgemm(short* d_a, short* d_b, short* d_c, bool a_t, bool b_t, int size) {
-    nervana_hgemm(d_a, d_b, d_c, a_t, b_t, size, size, size, size, size, size, 1.0, 0.0, NULL, false, false, 0);
+    if (!nervana_hgemm(d_a, d_b, d_c, a_t, b_t, size, size, size, size, size, size, 1.0, 0.0, NULL, false, false, 0))
+        return;
+
+    short* h_c = (short *)malloc(sizeof(short) * size * size);
+    cudaMemcpy(h_c, d_c, sizeof(short) * size * size, cudaMemcpyDeviceToHost);
+
+    for (int i = 0; i < size * size; ++i) {
+        if (h_c[i] != 0)
+            std::cout << "Mismatch at " << i << " " << h_c[i] << " " << 0 << std::endl;
+    }
+
+    free(h_c);
+}
+
+void test_hsgemm(short* d_a, float* d_b, short* d_c, bool a_t, bool b_t, int size) {
+    if (!nervana_hsgemm(d_a, d_b, d_c, a_t, b_t, size, size, size, size, size, size, 1.0, 0.0, NULL, false, false, 0))
+        return;
 
     short* h_c = (short *)malloc(sizeof(short) * size * size);
     cudaMemcpy(h_c, d_c, sizeof(short) * size * size, cudaMemcpyDeviceToHost);
@@ -39,7 +55,8 @@ void test_hgemm(short* d_a, short* d_b, short* d_c, bool a_t, bool b_t, int size
 }
 
 void test_sgemm(float* d_a, float* d_b, float* d_c, bool a_t, bool b_t, int size) {
-    nervana_sgemm(d_a, d_b, d_c, a_t, b_t, size, size, size, size, size, size, 1.0, 0.0, NULL, false, false, 0);
+    if (!nervana_sgemm(d_a, d_b, d_c, a_t, b_t, size, size, size, size, size, size, 1.0, 0.0, NULL, false, false, 0))
+        return;
 
     float* h_c = (float *)malloc(sizeof(float) * size * size);
     cudaMemcpy(h_c, d_c, sizeof(float) * size * size, cudaMemcpyDeviceToHost);
@@ -59,7 +76,10 @@ int main() {
         exit(1);
     }
 
-    nervana_loadKernels("/tools/nervana/cubin/");
+    if (!nervana_loadKernels("../cubin/")) {
+        std::cerr << "Couldn't load all kernels" << std::endl;
+        exit(1);
+    }
 
     //make sure we load and run all different blocking and vector variants
     std::vector<int> sizes {257, 256, 255, 129, 128, 127, 65, 64, 17, 16, 15};
@@ -107,6 +127,31 @@ int main() {
             test_hgemm(d_a, d_b, d_c, false, false, size);
             test_hgemm(d_a, d_b, d_c, false, true, size);
             test_hgemm(d_a, d_b, d_c, true, false, size);
+        }
+
+        cudaFree(d_a);
+        cudaFree(d_b);
+        cudaFree(d_c);
+    }
+
+    {
+        short *d_a, *d_c;
+        float *d_b;
+        int size = sizes[0];
+
+        std::vector<short> h_a(size * size, 0);
+        std::vector<float> h_b(size * size, 0);
+
+        cudaMalloc(&d_a, sizeof(short) * size * size);
+        cudaMalloc(&d_b, sizeof(float) * size * size);
+        cudaMalloc(&d_c, sizeof(short) * size * size);
+
+        cudaMemcpy(d_a, h_a.data(), sizeof(short) * size * size, cudaMemcpyHostToDevice);
+        cudaMemcpy(d_b, h_b.data(), sizeof(float) * size * size, cudaMemcpyHostToDevice);
+
+        for (auto size : sizes) {
+            test_hsgemm(d_a, d_b, d_c, false, false, size);
+            test_hsgemm(d_a, d_b, d_c, false, true, size);
         }
 
         cudaFree(d_a);

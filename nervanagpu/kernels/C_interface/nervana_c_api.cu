@@ -37,7 +37,7 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
 
     //better would be a vector<string>, but there is a bug in nvcc that prevents this
     // (bug report filed)
-    std::string names[28] = {
+    std::string names[40] = {
         "hgemm_nn_vec_128x128",
         "hgemm_nn_128x128",
         "hgemm_nt_vec_128x128",
@@ -52,6 +52,8 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
         "hgemm_nn_128x32",
         "hgemm_tn_vec_128x32",
         "hgemm_tn_128x32",
+        "hgemm_nn_32x128",
+        "hgemm_nn_vec_32x128",
         "sgemm_nn_vec_128x128",
         "sgemm_nn_128x128",
         "sgemm_nt_vec_128x128",
@@ -66,6 +68,16 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
         "sgemm_nn_128x32",
         "sgemm_tn_vec_128x32",
         "sgemm_tn_128x32",
+        "sgemm_nn_32x128",
+        "sgemm_nn_vec_32x128",
+        "hsgemm_nn_128x128",
+        "hsgemm_nn_32x128",
+        "hsgemm_nn_vec_128x128",
+        "hsgemm_nn_vec_32x128",
+        "hsgemm_nt_128x128",
+        "hsgemm_nt_32x128",
+        "hsgemm_nt_vec_128x128",
+        "hsgemm_nt_vec_32x128"
     };
 
     std::string base_path(base_path_cstr);
@@ -154,9 +166,8 @@ extern "C" bool nervana_sgemm(float *A, float *B, float *C,
         }
     }
 
-    int gridA = m / 128 + (m % 128 != 0);
+    int gridA, gridB, threads;
 
-    int gridB, threads;
     std::string name = "sgemm_";
 
     std::string trans;
@@ -171,41 +182,53 @@ extern "C" bool nervana_sgemm(float *A, float *B, float *C,
          name += "_vec";
     }
 
-    int size = 0;
-    if (trans == "nt")
-        size = 128;
+    int sizeA = 0;
+    int sizeB = 0;
+    if (m < 128 && trans == "nn") { //use 32x128 kernels
+        sizeA = 32;
+        sizeB = 128;
+        gridA = m / sizeA + (m % sizeA != 0);
+        threads = 128;
+    }
+    else {
+        sizeA = 128;
+        gridA = m / sizeA + (m % sizeA != 0);
 
-    if (size == 0) {
-        if (n < 384 - 16) {
-            int n128 = n % 128;
-            if (n128 > 0 && n128 < 112) {
-                if (n128 > 48 && n128 <= 64) {
-                    int n64 = n / 64;
-                    n64 *= gridA / sm_count;
-                    if (n64 > 1 || trans == "tn") {
-                        size = 64;
+        if (trans == "nt")
+            sizeB = 128;
+
+        if (sizeB == 0) {
+            if (n < 384 - 16) {
+                int n128 = n % 128;
+                if (n128 > 0 && n128 < 112) {
+                    if (n128 > 48 && n128 <= 64) {
+                        int n64 = n / 64;
+                        n64 *= gridA / sm_count;
+                        if (n64 > 1 || trans == "tn") {
+                            sizeB = 64;
+                        }
+                        else {
+                            sizeB = 32;
+                        }
                     }
                     else {
-                        size = 32;
+                        sizeB = 32;
                     }
                 }
                 else {
-                    size = 32;
+                    sizeB = 128;
                 }
             }
             else {
-                size = 128;
+                sizeB = 128;
             }
         }
-        else {
-            size = 128;
-        }
+        threads = sizeB == 128 ? 256 : 128;
     }
 
-    gridB = n / size + (n % size != 0);
-    threads = size == 128 ? 256 : 128;
+    gridB = n / sizeB + (n % sizeB != 0);
     std::stringstream ss;
-    ss << "_128x" << size;
+    ss << "_" << sizeA << "x" << sizeB;
     name += ss.str();
 
     int flags = 0;
@@ -262,9 +285,8 @@ extern "C" bool nervana_hgemm(short *A, short *B, short *C,
         }
     }
 
-    int gridA = m / 128 + (m % 128 != 0);
+    int gridA, gridB, threads;
 
-    int gridB, threads;
     std::string name = "hgemm_";
 
     std::string trans;
@@ -279,41 +301,124 @@ extern "C" bool nervana_hgemm(short *A, short *B, short *C,
          name += "_vec";
     }
 
-    int size = 0;
-    if (trans == "nt")
-        size = 128;
+    int sizeA = 0;
+    int sizeB = 0;
+    if (m < 128 && trans == "nn") { //use 32x128 kernels
+        sizeA = 32;
+        sizeB = 128;
+        gridA = m / sizeA + (m % sizeA != 0);
+        threads = 128;
+    }
+    else {
+        sizeA = 128;
+        gridA = m / sizeA + (m % sizeA != 0);
 
-    if (size == 0) {
-        if (n < 384 - 16) {
-            int n128 = n % 128;
-            if (n128 > 0 && n128 < 112) {
-                if (n128 > 48 && n128 <= 64) {
-                    int n64 = n / 64;
-                    n64 *= gridA / sm_count;
-                    if (n64 > 1 || trans == "tn") {
-                        size = 64;
+        if (trans == "nt")
+            sizeB = 128;
+
+        if (sizeB == 0) {
+            if (n < 384 - 16) {
+                int n128 = n % 128;
+                if (n128 > 0 && n128 < 112) {
+                    if (n128 > 48 && n128 <= 64) {
+                        int n64 = n / 64;
+                        n64 *= gridA / sm_count;
+                        if (n64 > 1 || trans == "tn") {
+                            sizeB = 64;
+                        }
+                        else {
+                            sizeB = 32;
+                        }
                     }
                     else {
-                        size = 32;
+                        sizeB = 32;
                     }
                 }
                 else {
-                    size = 32;
+                    sizeB = 128;
                 }
             }
             else {
-                size = 128;
+                sizeB = 128;
             }
         }
-        else {
-            size = 128;
-        }
+        threads = sizeB == 128 ? 256 : 128;
     }
 
-    gridB = n / size + (n % size != 0);
-    threads = size == 128 ? 256 : 128;
+    gridB = n / sizeB + (n % sizeB != 0);
     std::stringstream ss;
-    ss << "_128x" << size;
+    ss << "_" << sizeA << "x" << sizeB;
+    name += ss.str();
+
+    int flags = 0;
+    flags |= (stochastic_round << 0);
+    flags |= (apply_relu << 1);
+
+    void *args[13] = {&rand_state, &A, &B, &C, &lda, &ldb, &ldc, &m, &n, &k, &alpha, &beta, &flags};
+
+    CUresult res = cuLaunchKernel(nervana_kernels_[name],
+                                  gridA, gridB, 1,
+                                  threads, 1, 1,
+                                  0,
+                                  stream, args, NULL);
+
+    if (res != CUDA_SUCCESS) {
+        std::cerr << "Error launching kernel " << name << " " << res << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+extern "C" bool nervana_hsgemm(short *A, float *B, short *C,
+                               bool a_t, bool b_t,
+                               int m, int n, int k,
+                               int lda, int ldb, int ldc,
+                               float alpha, float beta,
+                               unsigned int *rand_state,
+                               bool stochastic_round, bool apply_relu,
+                               CUstream stream
+                              )
+{
+    if (a_t) {
+        std::cerr << "The TN variant is not implemented for hsgemm" << std::endl;
+        return false;
+    }
+
+    int gridA, gridB, threads;
+
+    std::string name = "hsgemm_";
+
+    std::string trans;
+    trans += a_t ? 't' : 'n';
+    trans += b_t ? 't' : 'n';
+
+    name += trans;
+
+    if ( (trans == "nn" && k % 16 == 0 && n % 8 == 0) ||
+         (trans == "nt" && k % 16 == 0)) {
+         name += "_vec";
+    }
+
+    int sizeA = 0;
+    int sizeB = 0;
+    if (m < 128 && trans == "nn") { //use 32x128 kernels
+        sizeA = 32;
+        sizeB = 128;
+        gridA = m / sizeA + (m % sizeA != 0);
+        threads = 128;
+    }
+    else {
+        sizeA = 128;
+        sizeB = 128;
+        gridA = m / sizeA + (m % sizeA != 0);
+
+        threads = 256;
+    }
+
+    gridB = n / sizeB + (n % sizeB != 0);
+    std::stringstream ss;
+    ss << "_" << sizeA << "x" << sizeB;
     name += ss.str();
 
     int flags = 0;
