@@ -31,21 +31,30 @@ __global__ void %(name)s (
     unsigned* rand_state,
     %(arguments)s)
 {
-    const int tid = threadIdx.x;
-    const int bid = blockIdx.x;
-    const int yid = blockIdx.y;
+    const int tid  = threadIdx.x;
+    const int bid  = blockIdx.x;
+    const int b256 = blockIdx.y << 8;
 
     %(inits)s
 """
 
 _stage_template = {
     "loop" : r"""
-    
-    int end{0} = n{0};
-    if (gridDim.y > 1 && 256*(yid+1) < n{0})
-        end{0} = 256*(yid+1);
 
-    for (int i = 256*yid + tid; i < end{0}; i += 32)
+    for (int i = tid; i < n{0}; i += 32)
+    {{
+        %(loads{0})s
+
+        %(ops{0})s
+    }}
+""",
+    "bc_loop" : r"""
+
+    int end_val{0};
+    asm("min.s32 %%0, %%1, %%2;" : "=r"(end_val{0}) : "r"(n{0}), "r"(b256 + 256));
+    const int end{0} = end_val{0};
+
+    for (int i = b256 + tid; i < end{0}; i += 32)
     {{
         %(loads{0})s
 
@@ -207,14 +216,14 @@ _ew_strings = {
     # 0: arg_id, 1: stage, 2: type, 3: cvt
     "in" : {
         "arguments" : "const {2}* a{0}_in, int row_strd{0}, int col_strd{0}",
-        "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0} + 256 * yid * col_strd{0} + tid * col_strd{0};\n"
+        "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0} + b256 * col_strd{0} + tid * col_strd{0};\n"
                   "    int a{0}_inc{1} = 32 * col_strd{0};",
         "loads"     : "float a{0} = {3}(__ldg(a{0}_in{1}));\n"
               "        a{0}_in{1} += a{0}_inc{1};",
     },
     "out" : {
         "arguments" : "{2}* a_out, int row_strd, int col_strd",
-        "inits"     : "a_out += bid * row_strd + 256 * yid * col_strd + tid * col_strd;\n"
+        "inits"     : "a_out += bid * row_strd + b256 * col_strd + tid * col_strd;\n"
                   "    int out_inc = 32 * col_strd;",
     },
     "const" : {
@@ -311,9 +320,9 @@ def _get_module(template, template_vals):
 
     code = template % template_vals
 
-    f = open("%s.cu" % template_vals["name"], "w")
-    print >>f, code
-    f.close()
+    # f = open("%s.cu" % template_vals["name"], "w")
+    # print >>f, code
+    # f.close()
 
     # print "Compiling %s" % template_vals["name"]
 
@@ -336,6 +345,10 @@ def _get_compound_kernel(type_args):
     stage_type     = "loop"
     stage          = 0
     stack          = []
+
+    # single loop broadcast operation
+    if type_args[-1][3]:
+        stage_type = "bc_loop"
 
     # Do a first pass over the stack to find out to which stage each
     # tensor and operation belong.
@@ -451,7 +464,7 @@ def _get_compound_kernel(type_args):
     # print "\n".join(str(stage_map[i]) + " " + str(s) for i,s in enumerate(type_args))
     # print "\n"
     # print "\n".join(str(s) for s in placeholders)
-    # exit()
+    #exit()
 
     sig           = "P" # first param for rand_state
     stack         = []
@@ -824,7 +837,7 @@ def call_compound_kernel(rand_state, *args):
                     
                     # the axis dim is the thread loop stop condition
                     kernel_args.append(max_shape[axis])
-                    type_args.append((op_name, op_cnt, out.rounding))
+                    type_args.append((op_name, op_cnt, out.rounding, gridY > 1))
 
                 else:
                     type_args.append((op_name, op_cnt))
