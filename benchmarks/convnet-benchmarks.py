@@ -181,7 +181,7 @@ networks = {
 # "Alexnet","Overfeat","VGG", "Alexnet2","Overfeat2","VGG2"
 for net in ("Alexnet","Overfeat","VGG",):
 
-    for dtype in (np.float16, np.float32):
+    for dtype in (np.float16, np.float32): #np.float32
 
         network = networks[net]
         name    = "%s (dtype=%s, N=%d)" % (net, np.dtype(dtype).name, network[0]["N"])
@@ -322,7 +322,6 @@ for net in ("Alexnet","Overfeat","VGG",):
             # HACK: omit softmax and cost layers to compare to Soumith numbers:
             last_layer = layers[-1]
             last_layer.bprop_in    = last_layer.fprop_out
-            last_layer.bprop_in_ew = last_layer.fprop_out_ew
 
             start.record()
             flops = 0

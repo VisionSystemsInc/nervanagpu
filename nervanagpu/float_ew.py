@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import numpy as np
+from math import ceil
 from pycuda.compiler import SourceModule
 from pycuda.tools import context_dependent_memoize
 from pytools import memoize_method
@@ -32,14 +33,19 @@ __global__ void %(name)s (
 {
     const int tid = threadIdx.x;
     const int bid = blockIdx.x;
+    const int yid = blockIdx.y;
 
     %(inits)s
 """
 
 _stage_template = {
     "loop" : r"""
+    
+    int end{0} = n{0};
+    if (gridDim.y > 1 && 256*(yid+1) < n{0})
+        end{0} = 256*(yid+1);
 
-    for (int i = tid; i < n{0}; i += 32)
+    for (int i = 256*yid + tid; i < end{0}; i += 32)
     {{
         %(loads{0})s
 
@@ -201,14 +207,14 @@ _ew_strings = {
     # 0: arg_id, 1: stage, 2: type, 3: cvt
     "in" : {
         "arguments" : "const {2}* a{0}_in, int row_strd{0}, int col_strd{0}",
-        "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0} + tid * col_strd{0};\n"
+        "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0} + 256 * yid * col_strd{0} + tid * col_strd{0};\n"
                   "    int a{0}_inc{1} = 32 * col_strd{0};",
         "loads"     : "float a{0} = {3}(__ldg(a{0}_in{1}));\n"
               "        a{0}_in{1} += a{0}_inc{1};",
     },
     "out" : {
         "arguments" : "{2}* a_out, int row_strd, int col_strd",
-        "inits"     : "a_out += bid * row_strd + tid * col_strd;\n"
+        "inits"     : "a_out += bid * row_strd + 256 * yid * col_strd + tid * col_strd;\n"
                   "    int out_inc = 32 * col_strd;",
     },
     "const" : {
@@ -305,9 +311,9 @@ def _get_module(template, template_vals):
 
     code = template % template_vals
 
-    # f = open("%s.cu" % template_vals["name"], "w")
-    # print >>f, code
-    # f.close()
+    f = open("%s.cu" % template_vals["name"], "w")
+    print >>f, code
+    f.close()
 
     # print "Compiling %s" % template_vals["name"]
 
@@ -670,6 +676,7 @@ def _get_compound_kernel(type_args):
 
     module = _get_module(template, template_vals)
     kernel = module.get_function(template_vals["name"])
+    kernel.name = template_vals["name"]
     kernel.prepare(sig)
 
     return kernel
@@ -692,7 +699,9 @@ def call_compound_kernel(rand_state, *args):
     shape_stack = []
     # Apply reduction constraints and determine thread axis
     # Blocks will be allocated counter to this axis
+    # Also detect if this is a broadcast op.
     reduction = False
+    broadcast = False
     axis = 1
     for arg in args:
         if type(arg) is dict:
@@ -709,6 +718,10 @@ def call_compound_kernel(rand_state, *args):
                 else:
                     reduction = True
                     axis = arg["axis"]
+        elif isinstance(arg, ng.GPUTensor):
+            if arg.shape[0] == 1 or arg.shape[1] == 1:
+                broadcast = True
+
 
     # If reducing along axis 0 we need to reverse all strides.
     # Each block gets a column and the threads work down the columns.
@@ -718,6 +731,14 @@ def call_compound_kernel(rand_state, *args):
 
         # Array operand
         if isinstance(arg, ng.GPUTensor):
+
+            # use the more efficient dimensions if this is a plain ew op.
+            if broadcast or reduction:
+                shape   = arg.shape
+                strides = arg.strides
+            else:
+                shape   = arg.shape_ew
+                strides = arg.strides_ew
 
             # If same array is passed in multiple times to expression,
             # consolidate them into one kernel argument.
@@ -738,15 +759,15 @@ def call_compound_kernel(rand_state, *args):
 
                 # support transposed striding or reduction along an axis
                 # let C pointer arithmetic handle itemsize for us
-                strides = [s // arg.dtype.itemsize for s in arg.strides[::stride_order]]
+                strides = [s // arg.dtype.itemsize for s in strides[::stride_order]]
 
                 # special case of reducing and outputing along axis=0
-                if arg is out and axis == 0 and arg.shape[0] == 1:
+                if arg is out and axis == 0 and shape[0] == 1:
                     strides[0] = 1
                     strides[1] = 0
                 else:
                     # support broadcast of a row vector
-                    if arg.shape[0] == 1: strides[0] = 0
+                    if shape[0] == 1: strides[0] = 0
                     
                     # If we're traversing down the columns and this tensor has only one column,
                     # we preserve the col_stride to allow us to jump to the next row.
@@ -754,13 +775,13 @@ def call_compound_kernel(rand_state, *args):
                     if axis == 1:
                         # For the common case of traversing down the rows, zero the stride to 
                         # support broadcast of column vector.
-                        if arg.shape[1] == 1: strides[1] = 0
+                        if shape[1] == 1: strides[1] = 0
 
                 kernel_args.extend((arg.gpudata, strides[0], strides[1]))
 
             type_args.append((ng.GPUTensor, indx, arg.dtype.str[1:]))
 
-            shape_stack.append(arg.shape)
+            shape_stack.append(shape)
 
         # Constant operand
         elif type(arg) in (int, float):
@@ -793,6 +814,13 @@ def call_compound_kernel(rand_state, *args):
                                 raise TypeError("Input shape:%s not compatible" % (shape,))
 
                 if op_name == "assign":
+
+                    # break deep broadcast operations up into pieces tracked with blockId.y
+                    if not reduction and max_shape[1] >= 512:
+                        gridY = int(ceil(max_shape[1] / 256.))
+                        assert gridY < 2**16
+                    else:
+                        gridY = 1
                     
                     # the axis dim is the thread loop stop condition
                     kernel_args.append(max_shape[axis])
@@ -834,24 +862,26 @@ def call_compound_kernel(rand_state, *args):
     # get or create the kernel in the memoize cache
     kernel = _get_compound_kernel(tuple(type_args))
 
-    # if out.backend.bench:
-    #     repeat = out.backend.bench
-    #     start, end = ng._get_events()
-    #     start.record(out.backend.stream)
-    # else:
-    #     repeat = 1
+    #import ipdb; ipdb.set_trace()
 
-    # for r in range(repeat):
+    if out.backend.bench:
+        repeat = out.backend.bench
+        start, end = ng._get_events()
+        start.record(out.backend.stream)
+    else:
+        repeat = 1
 
-    # call the kernel with the number of blocks set as the size of the off-axis
-    # Maxwell does well with 32 thread sized blocks, no need to autotune.
-    kernel.prepared_async_call((max_shape[1-axis],1,1), (32,1,1), out.backend.stream, *kernel_args)
+    for r in range(repeat):
 
-    # if out.backend.bench:
-    #     end.record(out.backend.stream)
-    #     end.synchronize()
-    #     msecs = end.time_since(start) / repeat
-    #     print("%7.3f msecs (%dx) shape(%d,%d)" % (msecs, repeat, max_shape[0], max_shape[1]))
+        # call the kernel with the number of blocks set as the size of the off-axis
+        # Maxwell does well with 32 thread sized blocks, no need to autotune.
+        kernel.prepared_async_call((max_shape[1-axis],gridY,1), (32,1,1), out.backend.stream, *kernel_args)
+
+    if out.backend.bench:
+        end.record(out.backend.stream)
+        end.synchronize()
+        msecs = end.time_since(start) / repeat
+        print("%7.3f msecs shape(%d,%d) grid(%d,%d) %s" % (msecs, max_shape[0], max_shape[1], max_shape[1-axis], gridY, kernel.name))
 
     return out
 
@@ -861,6 +891,7 @@ __global__ void fp16_compensated_sum(
     unsigned short* a_sum, 
     unsigned short* a_cmp, 
     const unsigned short* a_add, 
+    float cmp_scale, float add_scale,
     int row_strd, int col_strd, int n)
 {
     const int tid = threadIdx.x;
@@ -881,7 +912,7 @@ __global__ void fp16_compensated_sum(
         a_add += inc;
 
         // Adjust amount to add by previous compensation
-        float y32 = a32 - c32;
+        float y32 = a32 * add_scale - c32 * cmp_scale;
 
         // Do the accumulation and truncate to the storage type
         unsigned short t16 = fp32_to_fp16(s32 + y32);
@@ -901,12 +932,58 @@ __global__ void fp16_compensated_sum(
 }
 """
 
-@context_dependent_memoize
-def _get_compensated_sum_kernel():
+_fp32_compensated_sum = r"""
 
-    module = SourceModule(_fp16_compensated_sum)
-    kernel = module.get_function("fp16_compensated_sum")
-    kernel.prepare("PPPiii")
+__global__ void fp32_compensated_sum(
+    float* a_sum, float* a_cmp, float* a_add, 
+    float cmp_scale, float add_scale,
+    int row_strd, int col_strd, int n)
+{
+    const int tid = threadIdx.x;
+    const int bid = blockIdx.x;
+
+    int offset = bid * row_strd + tid * col_strd;
+    int inc    = 32 * col_strd;
+
+    a_sum += offset;
+    a_cmp += offset;
+    a_add += offset;
+
+    for (int i = tid; i < n; i += 32)
+    {
+        float s32 = __ldg((const float*)a_sum);
+        float c32 = __ldg((const float*)a_cmp);
+        float a32 = __ldg(a_add);
+        a_add += inc;
+
+        // Adjust amount to add by previous compensation
+        float y32 = a32 * add_scale - c32 * cmp_scale;
+
+        // Do the accumulation
+        float t32 = s32 + y32;
+
+        // recover the low order bits that were lost in the truncation
+        c32 = (t32 - s32) - y32;
+
+        *a_sum = t32;
+        *a_cmp = c32;
+
+        a_sum += inc;
+        a_cmp += inc;
+    }
+}
+"""
+
+@context_dependent_memoize
+def _get_compensated_sum_kernel(dtype):
+
+    if dtype is np.float16:
+        module = SourceModule(_fp16_compensated_sum)
+        kernel = module.get_function("fp16_compensated_sum")
+    else:
+        module = SourceModule(_fp32_compensated_sum)
+        kernel = module.get_function("fp32_compensated_sum")
+    kernel.prepare("PPPffiii")
     return kernel
 
 

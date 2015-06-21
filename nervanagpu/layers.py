@@ -40,10 +40,8 @@ class Layer(object):
         self.sizeF = 0
 
     def init_activations(self):
-        self.fprop_out    = self.lib.empty(self.dimO2, dtype=self.dtype)
-        self.fprop_out_ew = self.fprop_out.reshape(self.dimOew)
-
-        self.act_stats1 = self.lib.empty((self.dimOew[0],1), dtype=np.float32)
+        self.fprop_out  = self.lib.empty(self.dimO2, dtype=self.dtype)
+        self.act_stats1 = self.lib.empty((self.dimO2[0],1), dtype=np.float32)
         self.act_stats2 = self.act_stats1[0:1,0:1]
 
     def init_deltas(self, shared=None):
@@ -51,8 +49,6 @@ class Layer(object):
             self.bprop_in = self.lib.empty(self.dimO2, dtype=self.dtype)
         else:
             self.bprop_in = shared.share(self.dimO2)
-
-        self.bprop_in_ew = self.bprop_in.reshape(self.dimOew)
 
     def init_weights(self, loc=0.0, scale=0.1, shared=None):
         if self.dimF2 is not None:
@@ -64,11 +60,7 @@ class Layer(object):
             else:
                 self.updates = shared.share(self.dimF2)
 
-            self.weights_ew  = self.weights.reshape(self.dimFew)
-            self.updates_ew  = self.updates.reshape(self.dimFew)
-            self.velocity_ew = self.velocity.reshape(self.dimFew)
-
-            self.weight_stats1 = self.lib.empty((self.dimFew[0],1), dtype=np.float32)
+            self.weight_stats1 = self.lib.empty((self.dimF2[0],1), dtype=np.float32)
             self.weight_stats2 = self.weight_stats1[0:1,0:1]
 
     def connect(self, prev_layer):
@@ -86,41 +78,41 @@ class Layer(object):
     # fprop relu happens inside of the conv and gemm kernels
     def bprop_relu(self):
 
-        self.bprop_in_ew *= self.fprop_out_ew > 0
+        self.bprop_in *= self.fprop_out > 0
 
     def grad_descent_momentum(self, momentum, learning_rate):
 
-        self.velocity_ew[:] = self.velocity_ew*momentum - self.updates_ew*learning_rate
-        self.weights_ew += self.velocity_ew
+        self.velocity[:] = self.velocity*momentum - self.updates*learning_rate
+        self.weights += self.velocity
 
     def get_activation_mean(self):
-        return self._get_mean(self.fprop_out_ew, self.act_stats1, self.act_stats2)
+        return self._get_mean(self.fprop_out, self.act_stats1, self.act_stats2)
 
     def get_delta_mean(self, mean=False):
-        return self._get_mean(self.bprop_in_ew, self.act_stats1, self.act_stats2)
+        return self._get_mean(self.bprop_in, self.act_stats1, self.act_stats2)
 
     def get_update_mean(self, mean=False):
         if self.dimF2 is not None:
-            return self._get_mean(self.updates_ew, self.weight_stats1, self.weight_stats2)
-        return self._get_mean(self.bprop_in_ew, self.act_stats1, self.act_stats2)
+            return self._get_mean(self.updates, self.weight_stats1, self.weight_stats2)
+        return self._get_mean(self.bprop_in, self.act_stats1, self.act_stats2)
 
     def get_weight_mean(self, mean=False):
         if self.dimF2 is not None:
-            return self._get_mean(self.weights_ew, self.weight_stats1, self.weight_stats2)
+            return self._get_mean(self.weights, self.weight_stats1, self.weight_stats2)
 
     def get_activation_max(self):
-        return self._get_max(self.fprop_out_ew, self.act_stats1, self.act_stats2)
+        return self._get_max(self.fprop_out, self.act_stats1, self.act_stats2)
 
     def get_delta_max(self, mean=False):
-        return self._get_max(self.bprop_in_ew, self.act_stats1, self.act_stats2)
+        return self._get_max(self.bprop_in, self.act_stats1, self.act_stats2)
 
     def get_update_max(self, mean=False):
         if self.dimF2 is not None:
-            return self._get_max(self.updates_ew, self.weight_stats1, self.weight_stats2)
+            return self._get_max(self.updates, self.weight_stats1, self.weight_stats2)
 
     def get_weight_max(self, mean=False):
         if self.dimF2 is not None:
-            return self._get_max(self.weights_ew, self.weight_stats1, self.weight_stats2)
+            return self._get_max(self.weights, self.weight_stats1, self.weight_stats2)
 
     def _get_mean(self, ary, buf1, buf2):
         return float(self.lib.mean(abs(ary), partial=buf1, out=buf2).get()[0,0])
@@ -140,7 +132,6 @@ class DataLayer(Layer):
         self.Q = W
         self.DHW = (D,H,W)
         self.dimO2  = (C*D*H*W,N)
-        self.dimOew = (C*D*H,W*N)
 
     def init_data(self, ary):
         self.fprop_out.set(ary)
@@ -160,17 +151,9 @@ class FullLayer(Layer):
         self.nOut   = nOut
         self.flops  = N * nIn * nOut * 2.0
         self.dimF2  = (nOut, nIn)
-        self.dimFew = (nOut, nIn)
         self.dimO2  = (nOut, N)
         self.sizeO  = nOut * N
         self.sizeF  = nIn * nOut
-        div = 1
-        min_blocks = _get_sm_count() * 8
-        for d in range(64,1,-1):
-            if nOut % d == 0 and nOut / d > min_blocks:
-                div = d
-                break
-        self.dimOew = (nOut/div, N*div)
 
         self.fprop_size = fprop_size
         self.bprop_size = bprop_size
@@ -230,9 +213,6 @@ class ConvLayer(Layer):
         self.dimI2  = (C*D*H*W,N)
         self.dimF2  = (C*T*R*S,K)
         self.dimO2  = (K*M*P*Q,N)
-        self.dimIew = (C*D*H,W*N)
-        self.dimFew = (C*T*R,S*K)
-        self.dimOew = (K*M*P,Q*N)
         self.sizeI  = reduce(mul, self.dimI, 1)
         self.sizeF  = reduce(mul, self.dimF, 1)
         self.sizeO  = reduce(mul, self.dimO, 1)
@@ -442,8 +422,6 @@ class PoolLayer(Layer):
         self.dimF2  = None
         self.dimI2  = (C*D*H*W,N)
         self.dimO2  = (K*M*P*Q,N)
-        self.dimIew = (C*D*H,W*N)
-        self.dimOew = (K*M*P,Q*N)
         self.sizeI  = reduce(mul, self.dimI, 1)
         self.sizeO  = reduce(mul, self.dimO, 1)
         self.nOut   = reduce(mul, self.MPQ, 1) * K

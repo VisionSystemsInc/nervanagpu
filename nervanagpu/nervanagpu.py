@@ -61,26 +61,34 @@ class GPUTensor(object):
         else:
             self.strides = tuple(strides)
 
-        self.backend    = backend
-        self.base       = base
-        self.shape      = shape
-        self.size       = size
-        self.dtype      = dtype
-        self.nbytes     = dtype.itemsize * size
-        self.allocator  = allocator
-        self.is_trans   = is_trans
-        self.name       = name
-        self.rounding   = rounding
+        self.backend     = backend
+        self.base        = base
+        self.shape       = shape
+        self.size        = size
+        self.dtype       = dtype
+        self.nbytes      = dtype.itemsize * size
+        self.allocator   = allocator
+        self.is_trans    = is_trans
+        self.name        = name
+        self.rounding    = rounding
+        self.kahan_count = 0
+        self.kahan_reset = 0
 
         # calculate dims that are efficient for elementwise ops
         # (that don't involve a reduction or broadcast along an axis)
-        sq_size = int(sqrt(size))
-        while sq_size > 0:
-            if size % sq_size == 0:
+        ew_size = 256
+        while ew_size > 0:
+            if size % ew_size == 0:
                 break
-            sq_size -= 1
+            ew_size -= 32
+        if ew_size == 0:
+            ew_size = 255
+            while ew_size > 0:
+                if size % ew_size == 0:
+                    break
+                ew_size -= 1
 
-        self.shape_ew   = (sq_size, size // sq_size)
+        self.shape_ew   = (size // ew_size, ew_size)
         self.strides_ew = _contiguous_strides(dtype.itemsize, self.shape_ew)
 
         if gpudata is None:
@@ -847,16 +855,23 @@ class NervanaGPU(object):
 
         return C
 
-    def compensated_sum(self, sum_tensor, cmp_tensor, add_tensor):
+    def compensated_sum(self, sum_tensor, cmp_tensor, add_tensor, cmp_scale=1.0, add_scale=1.0):
 
-        shape   = sum_tensor.shape_ew
-        strides = sum_tensor.strides_ew
-        kernel  = _get_compensated_sum_kernel()
+        if cmp_tensor.kahan_reset and cmp_tensor.kahan_count > cmp_tensor.kahan_reset:
+            cmp_scale = 0
+            cmp_tensor.kahan_count = 0
+
+        cmp_tensor.kahan_count += 1
+
+        shape    = sum_tensor.shape_ew
+        strides  = sum_tensor.strides_ew
+        itemsize = sum_tensor.dtype.itemsize
+        kernel   = _get_compensated_sum_kernel(sum_tensor.dtype.type)
 
         kernel.prepared_async_call(
             (shape[0],1,1), (32,1,1), self.stream,
             sum_tensor.gpudata, cmp_tensor.gpudata, add_tensor.gpudata,
-            strides[0]//2, strides[1]//2, shape[1])
+            cmp_scale, add_scale, strides[0]//itemsize, strides[1]//itemsize, shape[1])
 
     def add         (self, a, b, out=None): return OpTreeNode.build("add", a, b, out=out)
     def subtract    (self, a, b, out=None): return OpTreeNode.build("sub", a, b, out=out)
