@@ -712,9 +712,10 @@ def call_compound_kernel(rand_state, *args):
     shape_stack = []
     # Apply reduction constraints and determine thread axis
     # Blocks will be allocated counter to this axis
-    # Also detect if this is a broadcast op.
+    # Also detect if this is a broadcast or transpose op.
     reduction = False
     broadcast = False
+    transpose = False
     axis = 1
     for arg in args:
         if type(arg) is dict:
@@ -734,6 +735,8 @@ def call_compound_kernel(rand_state, *args):
         elif isinstance(arg, ng.GPUTensor):
             if arg.shape[0] == 1 or arg.shape[1] == 1:
                 broadcast = True
+            elif arg.is_trans:
+                transpose = True
 
 
     # If reducing along axis 0 we need to reverse all strides.
@@ -746,7 +749,7 @@ def call_compound_kernel(rand_state, *args):
         if isinstance(arg, ng.GPUTensor):
 
             # use the more efficient dimensions if this is a plain ew op.
-            if broadcast or reduction:
+            if broadcast or reduction or transpose:
                 shape   = arg.shape
                 strides = arg.strides
             else:
@@ -829,7 +832,7 @@ def call_compound_kernel(rand_state, *args):
                 if op_name == "assign":
 
                     # break deep broadcast operations up into pieces tracked with blockId.y
-                    if not reduction and max_shape[1] >= 512:
+                    if not (reduction or transpose) and max_shape[1] >= 512:
                         gridY = int(ceil(max_shape[1] / 256.))
                         assert gridY < 2**16
                     else:
