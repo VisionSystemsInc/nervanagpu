@@ -104,7 +104,7 @@ class GPUTensor(object):
             self.strides_ew = _contiguous_strides(dtype.itemsize, self.shape_ew)
         else:
             self.shape_ew   = shape
-            self.strides_ew = strides
+            self.strides_ew = self.strides
 
         if gpudata is None:
             if size:
