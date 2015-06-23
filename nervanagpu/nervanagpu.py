@@ -28,6 +28,9 @@ if sys.version_info >= (3, 0):
 
 class GPUTensor(object):
 
+    # import re
+    # nrv_re = re.compile(r'nervanagpu\.py$')
+
     def __init__(self, backend, shape,
                 dtype     = np.float16,
                 allocator = drv.mem_alloc,
@@ -37,6 +40,14 @@ class GPUTensor(object):
                 is_trans  = False,
                 name      = None,
                 rounding  = 0):
+
+        # import traceback as tb
+        # caller = None
+        # for frame in tb.extract_stack():
+        #     if GPUTensor.nrv_re.search(frame[0]):
+        #         break
+        #     caller = (frame[0],frame[1])
+        # print caller
 
         # supported dtypes
         assert dtype in (np.float16, np.float32, np.uint8, np.int8)
@@ -76,20 +87,24 @@ class GPUTensor(object):
 
         # calculate dims that are efficient for elementwise ops
         # (that don't involve a reduction or broadcast along an axis)
-        ew_size = 256
-        while ew_size > 0:
-            if size % ew_size == 0:
-                break
-            ew_size -= 32
-        if ew_size == 0:
-            ew_size = 255
+        if size > 1024:
+            ew_size = 256
             while ew_size > 0:
                 if size % ew_size == 0:
                     break
-                ew_size -= 1
+                ew_size -= 32
+            if ew_size == 0:
+                ew_size = 255
+                while ew_size > 0:
+                    if size % ew_size == 0:
+                        break
+                    ew_size -= 1
 
-        self.shape_ew   = (size // ew_size, ew_size)
-        self.strides_ew = _contiguous_strides(dtype.itemsize, self.shape_ew)
+            self.shape_ew   = (size // ew_size, ew_size)
+            self.strides_ew = _contiguous_strides(dtype.itemsize, self.shape_ew)
+        else:
+            self.shape_ew   = shape
+            self.strides_ew = strides
 
         if gpudata is None:
             if size:
@@ -216,6 +231,9 @@ class GPUTensor(object):
         return a sliced view of an array
         """
         if not isinstance(index, tuple):
+            # speed up common case of [:]
+            if index == slice(None,None,None):
+                return self
             index = (index,)
 
         new_shape = []
@@ -285,14 +303,22 @@ class GPUTensor(object):
 
             array_axis += 1
 
+        new_shape   = tuple(new_shape)
+        new_strides = tuple(new_strides)
+
+        if new_shape   == self.shape and \
+           new_strides == self.strides and \
+           new_offset  == 0:
+           return self
+
         return self.__class__(
                 backend    = self.backend,
-                shape      = tuple(new_shape),
+                shape      = new_shape,
                 dtype      = self.dtype,
                 allocator  = self.allocator,
                 base       = self,
                 gpudata    = int(self.gpudata)+new_offset,
-                strides    = tuple(new_strides),
+                strides    = new_strides,
                 name       = self.name,
                 rounding   = self.rounding)
 
@@ -622,6 +648,7 @@ class NervanaGPU(object):
         clss  = "hconv" if C.dtype.type is np.float16 else "sconv"
         if   A.dtype.type is np.uint8: op += '_u8'
         elif A.dtype.type is np.int8:  op += '_s8'
+        else: assert A.dtype == C.dtype
 
         flags = 0
         if C.rounding: flags |= 1 | (C.rounding << 16)
