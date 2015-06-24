@@ -57,7 +57,7 @@ def cublas_dot(A, B, C, alpha=1.0, beta=0.0, repeat=1):
 
 np.set_printoptions(threshold=8193, linewidth=600, formatter={'float':lambda x: "% .0f" % x})
 
-ng = NervanaGPU(stochastic_round=True, bench=False)
+ng = NervanaGPU(stochastic_round=0, bench=0)
 
 small_1  = (1,2,3,4,5,6,7,8,9,16,32,64,65,72,120,127,128,192)
 medium_1 = (32,64,128,192,778,785,786,787,794)
@@ -77,7 +77,7 @@ big_2    = (32,64,128,1536-80,1536-64,1536,1536+64,1536+80,3072,4096)
 
 for dtype in (np.float16, np.float32, ):
     
-    maxerr = .005 if dtype is np.float32 else 1.0
+    maxerr = .005 if dtype is np.float32 else 0.7
 
     itemsize = np.dtype(dtype).itemsize
 

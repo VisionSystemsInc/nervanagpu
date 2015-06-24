@@ -164,28 +164,28 @@ REMAINDER:
     return $vec ? q{
 
 // k must be multiple of 8
---:-:2:-:1  @P6 LDG.E.CI.128 loadB0, [trackB];
+--:-:1:-:1  @P6 LDG.E.CI.128 loadB0, [trackB];
 
---:-:3:-:1  @P5 LDG.E.CI.128 loadA0, [trackA + 4x<0>];
---:-:6:-:1  @P5 LDG.E.CI.128 loadA4, [trackA + 4x<8>];
+--:-:2:-:1  @P5 LDG.E.CI.128 loadA0, [trackA + 4x<0>];
+--:5:6:-:1  @P5 LDG.E.CI.128 loadA4, [trackA + 4x<8>];
 
---:-:4:-:1 @!P6 LDS.U.128 loadB0, [addr_zero];
---:-:5:-:1 @!P5 LDS.U.128 loadA0, [addr_zero];
+--:-:3:-:1 @!P6 LDS.U.128 loadB0, [addr_zero];
+--:-:4:-:1 @!P5 LDS.U.128 loadA0, [addr_zero];
 --:-:-:-:1 @!P5 LDS.U.128 loadA4, [addr_zero];
 
 --:-:-:-:0      PSETP.AND.AND P1, PT, PT, PT, PT;
 
-0a:-:-:-:1      STS.128 [writeBs], loadB0;
+05:-:-:-:1      STS.128 [writeBs], loadB0;
 
 --:-:-:-:6      IADD   trackB0.CC, trackB0, ldb8;
 --:-:-:-:0      IADD.X trackB1, trackB1, RZ;
 
-14:-:-:-:1      STS [writeAs + 4x<0*128>], loadA0;
+0a:-:-:-:1      STS [writeAs + 4x<0*128>], loadA0;
 --:-:-:-:1      STS [writeAs + 4x<1*128>], loadA1;
 --:-:-:-:1      STS [writeAs + 4x<2*128>], loadA2;
 --:-:-:-:1      STS [writeAs + 4x<3*128>], loadA3;
 
---:-:-:-:6      IADD   trackA0.CC, trackA0, 4x<16>;
+10:-:-:-:6      IADD   trackA0.CC, trackA0, 4x<16>;
 --:-:-:-:1      IADD.X trackA1, trackA1, RZ;
 
     } : q{
@@ -325,7 +325,7 @@ REMAINDER:
         j5c54 => "--:-:-:-:1  \@P3 IADD.X trackB1,    trackB1, RZ;\n",
 
         j6c63 => "--:-:-:-:0      IADD32I k, k, -8;\n" .
-                 "--:-:-:-:5  \@P0 BAR.SYNC 0;\n" .
+                 "--:-:-:-:5      BAR.SYNC 0;\n" .
                  "--:-:-:-:1  \@P0 LOP.XOR readAs, readAs, 4x<128*8*2>;\n" .
                  "--:-:-:-:1  \@P0 LOP.XOR readBs, readBs, 4x<128*8*2>;\n" .
                  "--:-:-:-:1  \@P0 LOP.XOR writeAs, writeAs, 4x<128*8*2>;\n" .
