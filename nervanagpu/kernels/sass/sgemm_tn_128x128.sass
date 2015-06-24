@@ -85,10 +85,6 @@
 --:-:-:-:1      MOV k, param_k;
 
 --:-:-:-:1      STS.128 [addr_zero], RZ;
-<CODE>
-        join('', map sprintf("--:-:-:-:1      MOV czero%02d, RZ;\n", $_), 0..31) .
-        join('', map sprintf("--:-:-:-:1      LDS.U.128 czero%02d, [addr_zero];\n", $_ * 4), 8..15);
-</CODE>
 
 <CODE>
     our $vec;
@@ -193,6 +189,10 @@
 --:-:-:-:1  @P1 LDG.E.CS seed, [Rand];
 
 </SCHEDULE_BLOCK>
+
+<CODE>
+        join('', map sprintf("--:-:-:-:1      LDS.U.128 czero%02d, [addr_zero];\n", $_ * 4), 0..15);
+</CODE>
 
 REMAINDER:
 

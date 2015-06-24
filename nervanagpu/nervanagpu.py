@@ -16,7 +16,6 @@ import os
 import sys
 import numpy as np
 import pycuda.driver as drv
-from math import sqrt
 from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
@@ -28,9 +27,6 @@ if sys.version_info >= (3, 0):
 
 class GPUTensor(object):
 
-    # import re
-    # nrv_re = re.compile(r'nervanagpu\.py$')
-
     def __init__(self, backend, shape,
                 dtype     = np.float16,
                 allocator = drv.mem_alloc,
@@ -40,14 +36,6 @@ class GPUTensor(object):
                 is_trans  = False,
                 name      = None,
                 rounding  = 0):
-
-        # import traceback as tb
-        # caller = None
-        # for frame in tb.extract_stack():
-        #     if GPUTensor.nrv_re.search(frame[0]):
-        #         break
-        #     caller = (frame[0],frame[1])
-        # print caller
 
         # supported dtypes
         assert dtype in (np.float16, np.float32, np.uint8, np.int8)
@@ -87,7 +75,10 @@ class GPUTensor(object):
 
         # calculate dims that are efficient for elementwise ops
         # (that don't involve a reduction or broadcast along an axis)
-        if size > 1024:
+        if size < 1024 or is_trans or shape[0] == 1 or shape[1] == 1:
+            self.shape_ew   = shape
+            self.strides_ew = self.strides
+        else:
             ew_size = 256
             while ew_size > 0:
                 if size % ew_size == 0:
@@ -102,9 +93,6 @@ class GPUTensor(object):
 
             self.shape_ew   = (size // ew_size, ew_size)
             self.strides_ew = _contiguous_strides(dtype.itemsize, self.shape_ew)
-        else:
-            self.shape_ew   = shape
-            self.strides_ew = self.strides
 
         if gpudata is None:
             if size:
@@ -303,17 +291,9 @@ class GPUTensor(object):
 
             array_axis += 1
 
-        new_shape   = tuple(new_shape)
-        new_strides = tuple(new_strides)
-
-        if new_shape   == self.shape and \
-           new_strides == self.strides and \
-           new_offset  == 0:
-           return self
-
         return self.__class__(
                 backend    = self.backend,
-                shape      = new_shape,
+                shape      = tuple(new_shape),
                 dtype      = self.dtype,
                 allocator  = self.allocator,
                 base       = self,
@@ -412,7 +392,6 @@ class GPUTensor(object):
                 strides    = _contiguous_strides(self.dtype.itemsize, shape),
                 name       = self.name,
                 rounding   = self.rounding)
-
 
     def share(self, shape, dtype=None, name=None):
         """
@@ -888,6 +867,9 @@ class NervanaGPU(object):
             cmp_scale = 0
             cmp_tensor.kahan_count = 0
 
+        assert sum_tensor.dtype.type == cmp_tensor.dtype.type == add_tensor.dtype.type
+        #import ipdb; ipdb.set_trace()
+
         cmp_tensor.kahan_count += 1
 
         shape    = sum_tensor.shape_ew
@@ -1145,3 +1127,15 @@ def _get_pool_kernel(path, clss, op):
     #print("Loaded: ", kernel)
     return func
 
+# debugging tool
+import re
+import traceback as tb
+
+nrv_re = re.compile(r'nervanagpu\.py$')
+def print_trace():
+    caller = None
+    for frame in tb.extract_stack():
+        if GPUTensor.nrv_re.search(frame[0]):
+            break
+        caller = (frame[0],frame[1])
+    print caller
