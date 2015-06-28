@@ -34,6 +34,7 @@ __global__ void %(name)s (
     const int tid  = threadIdx.x;
     const int bid  = blockIdx.x;
     const int b256 = blockIdx.y << 8;
+    const int col_offset = b256 + tid;
 
     %(inits)s
 """
@@ -54,7 +55,7 @@ _stage_template = {
     asm("min.s32 %%0, %%1, %%2;" : "=r"(end_val{0}) : "r"(n{0}), "r"(b256 + 256));
     const int end{0} = end_val{0};
 
-    for (int i = b256 + tid; i < end{0}; i += 32)
+    for (int i = col_offset; i < end{0}; i += 32)
     {{
         %(loads{0})s
 
@@ -216,14 +217,14 @@ _ew_strings = {
     # 0: arg_id, 1: stage, 2: type, 3: cvt
     "in" : {
         "arguments" : "const {2}* a{0}_in, int row_strd{0}, int col_strd{0}",
-        "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0} + b256 * col_strd{0} + tid * col_strd{0};\n"
+        "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0} + col_offset * col_strd{0};\n"
                   "    int a{0}_inc{1} = 32 * col_strd{0};",
         "loads"     : "float a{0} = {3}(__ldg(a{0}_in{1}));\n"
               "        a{0}_in{1} += a{0}_inc{1};",
     },
     "out" : {
         "arguments" : "{2}* a_out, int row_strd, int col_strd",
-        "inits"     : "a_out += bid * row_strd + b256 * col_strd + tid * col_strd;\n"
+        "inits"     : "a_out += bid * row_strd + col_offset * col_strd;\n"
                   "    int out_inc = 32 * col_strd;",
     },
     "const" : {
