@@ -75,7 +75,7 @@ class GPUTensor(object):
 
         # calculate dims that are efficient for elementwise ops
         # (that don't involve a reduction or broadcast along an axis)
-        if size < 1024 or is_trans or shape[0] == 1 or shape[1] == 1:
+        if len(shape) == 2 and (size < 256*16 or is_trans or shape[0] == 1 or shape[1] == 1):
             self.shape_ew   = shape
             self.strides_ew = self.strides
         else:
