@@ -734,7 +734,7 @@ def call_compound_kernel(rand_state, *args):
                     reduction = True
                     axis = arg["axis"]
         elif isinstance(arg, ng.GPUTensor):
-            if arg.shape[0] == 1 or arg.shape[1] == 1:
+            if len(arg.shape) < 2 or arg.shape[0] == 1 or arg.shape[1] == 1:
                 broadcast = True
             elif arg.is_trans:
                 transpose = True
@@ -750,7 +750,7 @@ def call_compound_kernel(rand_state, *args):
         if isinstance(arg, ng.GPUTensor):
 
             # use the more efficient dimensions if this is a plain ew op.
-            if broadcast or reduction or transpose:
+            if len(arg.shape) == 2 and (broadcast or reduction or transpose):
                 shape   = arg.shape
                 strides = arg.strides
             else:
