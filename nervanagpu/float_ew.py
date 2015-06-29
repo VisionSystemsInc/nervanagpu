@@ -89,47 +89,27 @@ _fin_template = r"""
 }
 """
 
-_common_fp32_to_i1 = r"""
-__device__ __forceinline__ char fp32_to_i1(float val)
-{
-    int ret;
-    asm("cvt.rni.s8.f32 %0, %1;" : "=r"(ret) : "f"(val));
-    return ret;
-}
-"""
-_common_fp32_to_u1 = r"""
-__device__ __forceinline__ unsigned char fp32_to_u1(float val)
-{
-    unsigned ret;
-    asm("cvt.rni.u8.f32 %0, %1;" : "=r"(ret) : "f"(val));
-    return ret;
-}
+_init_rand_func = r"""
+    unsigned lfsr0, lfsr1, lfsr2;
+    unsigned idx = bid * 32 + tid;
+    rand_state += idx % (2048*32);
+    lfsr0 = *rand_state;
+    asm("mov.b32 %0, %%clock;"          : "=r"(lfsr1) :);
+    asm("mov.b32 %0, %%globaltimer_lo;" : "=r"(lfsr2) :);
+    asm("shf.r.clamp.b32 %0,%0,%0,%1;"  : "=r"(lfsr1) : "r"((lfsr1 & 31)^tid));
+    asm("shf.r.clamp.b32 %0,%0,%0,%1;"  : "=r"(lfsr2) : "r"((lfsr2 & 31)^tid));
+    lfsr1 ^= (idx << 3)  ^ (idx << 7);
+    lfsr2 ^= (idx << 17) ^ (idx << 23);
 """
 
-_common_fp16_to_fp32 = r"""
-__device__ __forceinline__ float fp16_to_fp32(unsigned short val)
-{
-    float ret;
-    asm("{\n\t"
-        ".reg .f16 f16;\n\t"
-        "mov.b16 f16, %1;\n\t"
-        "cvt.f32.f16 %0, f16;"
-        "}" : "=f"(ret) : "h"(val));
-    return ret;
-}
+_init_rand_round_func = r"""
+    int i_rand_scale = (127 - 32 - mantissa_bits) << 23;
+    float rand_scale = *(float*)&i_rand_scale;
+    unsigned rand_mask = 0xffffffff << (23 - mantissa_bits);
 """
 
-_common_fp32_to_fp16 = r"""
-__device__ __forceinline__ unsigned short fp32_to_fp16(float val)
-{
-    unsigned short ret;
-    asm("{\n\t"
-        ".reg .f16 f16;\n\t"
-        "cvt.rn.f16.f32 f16, %1;"
-        "mov.b16 %0, f16;\n\t"
-        "}" : "=h"(ret) : "f"(val));
-    return ret;
-}
+_finish_rand_func = r"""
+    *rand_state = lfsr0 ^ lfsr1 ^ lfsr2;
 """
 
 _common_urand_gen = r"""
@@ -154,9 +134,32 @@ __device__ __forceinline__ float frand(unsigned& lfsr0, unsigned& lfsr1, unsigne
 }
 """
 
-_common_random_round = r"""
+_common_round = {
+
+    "random" : {
+
+        "f4" : r"""
+__device__ float fp32_to_fp32_rand(
+    float val, unsigned& lfsr0, unsigned& lfsr1, unsigned& lfsr2, float rand_scale, unsigned rand_mask)
+{
+    unsigned urand = urand_gen(lfsr0, lfsr1, lfsr2);
+
+    float ret;
+    asm("{\n\t"
+        ".reg .f32 exponent, frand, result;\n\t"
+        "and.b32 exponent, %1, 0xff800000;\n\t"
+        "mul.f32 exponent, exponent, %2;\n\t"
+        "cvt.rz.f32.u32 frand, %3;\n\t"
+        "fma.rz.f32 result, exponent, frand, %1;\n\t"
+        "and.b32 %0, result, %4;\n\t"
+        "}" : "=f"(ret) : "f"(val), "f"(rand_scale), "r"(urand), "r"(rand_mask));
+
+    return ret;
+}
+""",
+        "f2" : r"""
 __device__ unsigned short fp32_to_fp16_rand(
-    float val, unsigned& lfsr0, unsigned& lfsr1, unsigned& lfsr2)
+    float val, unsigned& lfsr0, unsigned& lfsr1, unsigned& lfsr2, float rand_scale, unsigned rand_mask)
 {
     unsigned urand = urand_gen(lfsr0, lfsr1, lfsr2);
 
@@ -165,32 +168,66 @@ __device__ unsigned short fp32_to_fp16_rand(
         ".reg .f16 result16;\n\t"
         ".reg .f32 exponent, frand, result32;\n\t"
         "and.b32 exponent, %1, 0xff800000;\n\t"
-        "mul.f32 exponent, exponent, 0F2a800000;\n\t"
-        "cvt.rz.f32.u32 frand, %2;\n\t"
+        "mul.f32 exponent, exponent, %2;\n\t"
+        "cvt.rz.f32.u32 frand, %3;\n\t"
         "fma.rz.f32 result32, exponent, frand, %1;\n\t"
+        "and.b32 result32, result32, %4;\n\t"
         "cvt.rz.f16.f32 result16, result32;\n\t"
         "mov.b16 %0, result16;\n\t"
-        "}" : "=h"(half) : "f"(val), "r"(urand));
+        "}" : "=h"(half) : "f"(val), "f"(rand_scale), "r"(urand), "r"(rand_mask));
 
     return half;
 }
-"""
+""",
+    },
+    "nearest" : {
 
-_init_rand_func = r"""
-    unsigned lfsr0, lfsr1, lfsr2;
-    unsigned idx = bid * 32 + tid;
-    rand_state += idx % (2048*32);
-    lfsr0 = *rand_state;
-    asm("mov.b32 %0, %%clock;"          : "=r"(lfsr1) :);
-    asm("mov.b32 %0, %%globaltimer_lo;" : "=r"(lfsr2) :);
-    asm("shf.r.clamp.b32 %0,%0,%0,%1;"  : "=r"(lfsr1) : "r"((lfsr1 & 31)^tid));
-    asm("shf.r.clamp.b32 %0,%0,%0,%1;"  : "=r"(lfsr2) : "r"((lfsr2 & 31)^tid));
-    lfsr1 ^= (idx << 3)  ^ (idx << 7);
-    lfsr2 ^= (idx << 17) ^ (idx << 23);
-"""
+        "f2" : r"""
+__device__ __forceinline__ unsigned short fp32_to_fp16(float val)
+{
+    unsigned short ret;
+    asm("{\n\t"
+        ".reg .f16 f16;\n\t"
+        "cvt.rn.f16.f32 f16, %1;"
+        "mov.b16 %0, f16;\n\t"
+        "}" : "=h"(ret) : "f"(val));
+    return ret;
+}
+""",
+        "i1" : r"""
+__device__ __forceinline__ char fp32_to_int8(float val)
+{
+    int ret;
+    asm("cvt.rni.s8.f32 %0, %1;" : "=r"(ret) : "f"(val));
+    return ret;
+}
+""",
+        "u1" : r"""
+__device__ __forceinline__ unsigned char fp32_to_uint8(float val)
+{
+    unsigned ret;
+    asm("cvt.rni.u8.f32 %0, %1;" : "=r"(ret) : "f"(val));
+    return ret;
+}
+""",
+    },
+}
+# random rounding not used for these types
+_common_round["random"]["i1"] = _common_round["nearest"]["i1"]
+_common_round["random"]["u1"] = _common_round["nearest"]["u1"]
 
-_finish_rand_func = r"""
-    *rand_state = lfsr0 ^ lfsr1 ^ lfsr2;
+
+_common_fp16_to_fp32 = r"""
+__device__ __forceinline__ float fp16_to_fp32(unsigned short val)
+{
+    float ret;
+    asm("{\n\t"
+        ".reg .f16 f16;\n\t"
+        "mov.b16 f16, %1;\n\t"
+        "cvt.f32.f16 %0, f16;"
+        "}" : "=f"(ret) : "h"(val));
+    return ret;
+}
 """
 
 _ew_types = {
@@ -231,10 +268,17 @@ _ew_strings = {
         "arguments" : "float c{0}",
     },
     "round" : {
-        "nearest" : "unsigned short {0} = fp32_to_fp16({1});",
-        "random"  : "unsigned short {0} = fp32_to_fp16_rand({1}, lfsr0, lfsr1, lfsr2);",
-        "i1"      : "char {0} = fp32_to_i1({1});",
-        "u1"      : "unsigned char {0} = fp32_to_u1({1});",
+        "random"  : {
+            "f4"  : "float {0}          = fp32_to_fp32_rand({1}, lfsr0, lfsr1, lfsr2, rand_scale, rand_mask);",
+            "f2"  : "unsigned short {0} = fp32_to_fp16_rand({1}, lfsr0, lfsr1, lfsr2, rand_scale, rand_mask);",
+            "i1"  : "char {0}           = fp32_to_int8({1});",
+            "u1"  : "unsigned char {0}  = fp32_to_uint8({1});",
+        },
+        "nearest" : {
+            "f2"  : "unsigned short {0} = fp32_to_fp16({1});",
+            "i1"  : "char {0}           = fp32_to_int8({1});",
+            "u1"  : "unsigned char {0}  = fp32_to_uint8({1});",
+        },
     },
 }
 
@@ -321,13 +365,14 @@ def _get_module(template, template_vals):
 
     code = template % template_vals
 
+    # f = open("kernel.cu", "w")
     # f = open("%s.cu" % template_vals["name"], "w")
     # print >>f, code
     # f.close()
 
     # print "Compiling %s" % template_vals["name"]
 
-    return SourceModule(code, options=["--use_fast_math" ], keep=False) #,"-G"
+    return SourceModule(code, options=[ "--use_fast_math" ], keep=False) #,"-G"
 
 def _init_rand(template_vals):
 
@@ -572,49 +617,39 @@ def _get_compound_kernel(type_args):
 
             if arg_type == "assign":
 
-                rounding = arg[2]
                 ops = "ops%d" % stage
 
                 # loop end condition for last stage
                 sig += "i"
-                template_vals["arguments"].append("int n%d" % stage)
+                template_vals["arguments"].append("const int n%d" % stage)
 
-                out_val = stack.pop()
+                # rounding mode
+                if arg[2]:
+                    mode = "random"
+                    post = "rr"
+                    sig += "i"
+                    template_vals["arguments"].append("const int mantissa_bits")
+                    if not rand_init:
+                        rand_init = _init_rand(template_vals)
+                    template_vals["inits"].append(_init_rand_round_func)
+                else:
+                    mode = "nearest"
+                    post = "rn"
 
-                # rounding
-                if out_dtype != "f4":
-
+                out_val   = stack.pop()
+                ew_round  = _ew_strings["round"][mode].get(out_dtype, None)
+                ew_common = _common_round[mode].get(out_dtype, None)
+                if ew_common:
+                    template_vals["common"].append(ew_common)
+                
+                template_vals["name"] += post
+                if ew_round:
                     round_val = "r%d" % arg_id
+                    template_vals[ops].append(ew_round.format(round_val, out_val))
+                else:
+                    round_val = out_val
 
-                    ew_round = _ew_strings["round"]
-
-                    if out_dtype == "f2": 
-                        # random rounding
-                        if rounding > 0:
-                            if not rand_init:
-                                rand_init = _init_rand(template_vals)
-
-                            template_vals["common"].append(_common_random_round)
-                            template_vals["name"] += "rr"
-                            template_vals[ops].append(ew_round["random"].format(round_val, out_val))
-
-                        # nearest rounding (unbiased)
-                        else:
-                            template_vals["common"].append(_common_fp32_to_fp16)
-                            template_vals["name"] += "rn"
-                            template_vals[ops].append(ew_round["nearest"].format(round_val, out_val))
-
-                    # int8 and uint8:
-                    else:
-                        if out_dtype == "i1":  
-                            template_vals["common"].append(_common_fp32_to_i1)
-                        else:
-                            template_vals["common"].append(_common_fp32_to_u1)
-                        template_vals[ops].append(ew_round[out_dtype].format(round_val, out_val))
-
-                    out_val = round_val
-
-                template_vals[ops].append(_float_ops[arg_type][1].format(out_val))
+                template_vals[ops].append(_float_ops[arg_type][1].format(round_val))
 
             elif arg_type in _float_ops:
 
@@ -646,7 +681,7 @@ def _get_compound_kernel(type_args):
                 # loop end condition for current stage
                 # add regardless of duplicate reduction stage
                 sig += "i"
-                template_vals["arguments"].append("int n%d" % stage)
+                template_vals["arguments"].append("const int n%d" % stage)
                 
                 # if this is a duplicate reduction just push the previous
                 # result back onto the stack.
@@ -841,7 +876,22 @@ def call_compound_kernel(rand_state, *args):
                     
                     # the axis dim is the thread loop stop condition
                     kernel_args.append(max_shape[axis])
-                    type_args.append((op_name, op_cnt, out.rounding, gridY > 1))
+
+                    rounding = out.rounding
+                    
+                    # support rounding to arbitrary mantissa size
+                    if rounding:
+                        # convert bool to some default mantissa
+                        if rounding is True:
+                            rounding = 10
+                        elif out.dtype.type is np.float32:
+                            rounding = min(rounding,22)
+                        elif out.dtype.type is np.float16:
+                            rounding = min(rounding,10)
+
+                        kernel_args.append(max(rounding,1))
+
+                    type_args.append((op_name, op_cnt, rounding > 0, gridY > 1))
 
                 else:
                     type_args.append((op_name, op_cnt))
@@ -892,6 +942,7 @@ def call_compound_kernel(rand_state, *args):
 
         # call the kernel with the number of blocks set as the size of the off-axis
         # Maxwell does well with 32 thread sized blocks, no need to autotune.
+        #for a in kernel_args: print a
         kernel.prepared_async_call((max_shape[1-axis],gridY,1), (32,1,1), out.backend.stream, *kernel_args)
 
     if out.backend.bench:
@@ -902,14 +953,16 @@ def call_compound_kernel(rand_state, *args):
 
     return out
 
-_fp16_compensated_sum = _common_fp16_to_fp32 + _common_fp32_to_fp16 + r"""
+_compensated_sum = r"""
 
-__global__ void fp16_compensated_sum(
-    unsigned short* a_sum, 
-    unsigned short* a_cmp, 
-    const unsigned short* a_add, 
+%(common)s
+
+__global__ void compensated_sum(unsigned* rand_state,
+          %(type)s* a_sum, 
+          %(type)s* a_cmp, 
+    const %(type)s* a_add, 
     float cmp_scale, float add_scale,
-    int row_strd, int col_strd, int n)
+    int row_strd, int col_strd, int n, int mantissa_bits)
 {
     const int tid = threadIdx.x;
     const int bid = blockIdx.x;
@@ -921,87 +974,78 @@ __global__ void fp16_compensated_sum(
     a_cmp += offset;
     a_add += offset;
 
+    %(inits)s
+
     for (int i = tid; i < n; i += 32)
     {
-        float s32 = fp16_to_fp32(__ldg((const unsigned short*)a_sum));
-        float c32 = fp16_to_fp32(__ldg((const unsigned short*)a_cmp));
-        float a32 = fp16_to_fp32(__ldg(a_add));
-        a_add += inc;
+        float s32 = %(cvt)s(__ldg((const %(type)s*)a_sum));
+        float c32 = %(cvt)s(__ldg((const %(type)s*)a_cmp));
+        float a32 = %(cvt)s(__ldg(a_add));
 
         // Adjust amount to add by previous compensation
         float y32 = a32 * add_scale - c32 * cmp_scale;
 
         // Do the accumulation and truncate to the storage type
-        unsigned short t16 = fp32_to_fp16(s32 + y32);
+        float rnd_sum = s32 + y32;
+        %(rnd_sum)s
 
         // Convert accumulation back to fp32 so we can do more math on it
-        float t32 = fp16_to_fp32(t16);
+        float t32 = %(cvt)s(t16);
 
         // recover the low order bits that were lost in the truncation
-        unsigned short c16 = fp32_to_fp16((t32 - s32) - y32);
+        float rnd_cmp = (t32 - s32) - y32;
+        %(rnd_cmp)s
 
         *a_sum = t16;
         *a_cmp = c16;
 
         a_sum += inc;
         a_cmp += inc;
-    }
-}
-"""
-
-_fp32_compensated_sum = r"""
-
-__global__ void fp32_compensated_sum(
-    float* a_sum, float* a_cmp, float* a_add, 
-    float cmp_scale, float add_scale,
-    int row_strd, int col_strd, int n)
-{
-    const int tid = threadIdx.x;
-    const int bid = blockIdx.x;
-
-    int offset = bid * row_strd + tid * col_strd;
-    int inc    = 32 * col_strd;
-
-    a_sum += offset;
-    a_cmp += offset;
-    a_add += offset;
-
-    for (int i = tid; i < n; i += 32)
-    {
-        float s32 = __ldg((const float*)a_sum);
-        float c32 = __ldg((const float*)a_cmp);
-        float a32 = __ldg(a_add);
         a_add += inc;
-
-        // Adjust amount to add by previous compensation
-        float y32 = a32 * add_scale - c32 * cmp_scale;
-
-        // Do the accumulation
-        float t32 = s32 + y32;
-
-        // recover the low order bits that were lost in the truncation
-        c32 = (t32 - s32) - y32;
-
-        *a_sum = t32;
-        *a_cmp = c32;
-
-        a_sum += inc;
-        a_cmp += inc;
     }
+    %(finish)s
 }
 """
 
 @context_dependent_memoize
-def _get_compensated_sum_kernel(dtype):
+def _get_compensated_sum_kernel(dtype, rounding):
 
-    if dtype is np.float16:
-        module = SourceModule(_fp16_compensated_sum)
-        kernel = module.get_function("fp16_compensated_sum")
+    template_vals = dict()
+    for key in ("common", "inits", "finish"):
+        template_vals[key] = ""
+
+    if dtype == "f2":
+        template_vals["common"] += _common_fp16_to_fp32
+
+    if rounding:
+        template_vals["common"] += _common_urand_gen
+        template_vals["common"] += _common_round["nearest"].get(dtype,"")
+        template_vals["inits" ] += _init_rand_func + _init_rand_round_func
+        template_vals["finish"] += _finish_rand_func
+        mode = "random"
     else:
-        module = SourceModule(_fp32_compensated_sum)
-        kernel = module.get_function("fp32_compensated_sum")
-    kernel.prepare("PPPffiii")
+        mode = "nearest"
+
+    template_vals["common"] += _common_round[mode].get(dtype,"")
+
+    template_vals["type"] = _ew_types[dtype]["type"]
+    template_vals["cvt"]  = _ew_types[dtype]["cvt"]
+
+    no_op = "float {0} = {1};"
+
+    rnd_sum = _ew_strings["round"][  mode   ].get(dtype, no_op)
+    rnd_cmp = _ew_strings["round"]["nearest"].get(dtype, no_op)
+
+    template_vals["rnd_sum"] = rnd_sum.format("t16","rnd_sum")
+    template_vals["rnd_cmp"] = rnd_cmp.format("c16","rnd_cmp")
+
+    code = _compensated_sum % template_vals
+
+    # f = open("compensated_sum.cu", "w")
+    # print >>f, code
+    # f.close()
+
+    module = SourceModule(code)
+    kernel = module.get_function("compensated_sum")
+    kernel.prepare("PPPPffiiii")
     return kernel
-
-
-

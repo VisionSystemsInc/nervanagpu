@@ -16,6 +16,7 @@ import os
 import sys
 import numpy as np
 import pycuda.driver as drv
+from math import ceil
 from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
@@ -244,7 +245,7 @@ class GPUTensor(object):
 
                 array_stride = self.strides[array_axis]
 
-                new_shape.append((stop-start)//idx_stride)
+                new_shape.append(int(ceil(float(stop-start)/idx_stride)))
                 new_strides.append(idx_stride*array_stride)
                 new_offset += array_stride*start
 
@@ -875,12 +876,14 @@ class NervanaGPU(object):
         shape    = sum_tensor.shape_ew
         strides  = sum_tensor.strides_ew
         itemsize = sum_tensor.dtype.itemsize
-        kernel   = _get_compensated_sum_kernel(sum_tensor.dtype.type)
+        kernel   = _get_compensated_sum_kernel(sum_tensor.dtype.str[1:], sum_tensor.rounding > 0)
 
         kernel.prepared_async_call(
-            (shape[0],1,1), (32,1,1), self.stream,
+            (shape[0],1,1), (32,1,1), self.stream, _get_rand_state(),
             sum_tensor.gpudata, cmp_tensor.gpudata, add_tensor.gpudata,
-            cmp_scale, add_scale, strides[0]//itemsize, strides[1]//itemsize, shape[1])
+            cmp_scale, add_scale, 
+            strides[0]//itemsize, strides[1]//itemsize, 
+            shape[1], sum_tensor.rounding)
 
     def add         (self, a, b, out=None): return OpTreeNode.build("add", a, b, out=out)
     def subtract    (self, a, b, out=None): return OpTreeNode.build("sub", a, b, out=out)
