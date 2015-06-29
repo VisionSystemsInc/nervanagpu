@@ -489,6 +489,13 @@ class NervanaGPU(object):
                           set to zero to disable stochastic rouding.
         bench: set to 1 to print out performance data for most kernel calls
         """
+        
+        if stochastic_round:
+            if stochastic_round is True:
+                stochastic_round = 10
+        else:
+            stochastic_round = 0
+
         self.round_mode = stochastic_round
         self.cubin_path = os.path.join(os.path.dirname(__file__), cubin_path)
         self.bench = bench

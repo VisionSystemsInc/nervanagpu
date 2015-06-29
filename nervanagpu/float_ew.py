@@ -356,7 +356,16 @@ _reduction_ops = {
     },
 }
 
-
+# import re
+# import traceback as tb
+# nrv_re = re.compile(r'gpu\.py$')
+# def _get_trace():
+#     caller = None
+#     for frame in tb.extract_stack():
+#         if nrv_re.search(frame[0]):
+#             break
+#         caller = (frame[0],frame[1])
+#     return caller
 
 def _get_module(template, template_vals):
 
@@ -370,7 +379,7 @@ def _get_module(template, template_vals):
     # print >>f, code
     # f.close()
 
-    # print "Compiling %s" % template_vals["name"]
+    # print "Compiling %s %s" % (template_vals["name"], _get_trace())
 
     return SourceModule(code, options=[ "--use_fast_math" ], keep=False) #,"-G"
 
