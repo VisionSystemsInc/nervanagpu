@@ -3,9 +3,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -306,13 +306,13 @@ _float_ops = {
     "ge"      : (2, "float {0} = {2} >= {1};"   ),
     "minimum" : (2, "float {0} = fminf({2},{1});" ),
     "maximum" : (2, "float {0} = fmaxf({2},{1});" ),
+    "pow"     : (1, "float {0} = powf({2}, {1});" ),
     "finite"  : (1, _is_finite ),
     "neg"     : (1, "float {0} = -{1};"         ),
     "abs"     : (1, "float {0} = abs({1});"     ),
     "sgn"     : (1, "float {0} = copysignf(1.0f, {1});"     ),
     "sqrt"    : (1, "float {0} = sqrtf({1});"   ),
     "sqr"     : (1, "float {0} = {1} * {1};"    ),
-    "pow"     : (1, "float {0} = powf({1});"    ),
     "exp"     : (1, "float {0} = expf({1});"    ),
     "log"     : (1, "float {0} = logf({1});"    ),
     "exp2"    : (1, "float {0} = exp2f({1});"   ),
@@ -467,7 +467,7 @@ def _get_compound_kernel(type_args):
             operand_i, operand = stack.pop()
             if operand[0] is ng.GPUTensor:
                 stage_map[operand_i] = (stage,stage_type)
-            
+
             # just append the temp float as a placeholder
             stack.append((-1,(float,)))
 
@@ -488,7 +488,7 @@ def _get_compound_kernel(type_args):
                         red_sig.append(tuple(a[0:2]))
             red_sig = tuple(red_sig)
 
-            # Look for duplicate reductions 
+            # Look for duplicate reductions
             if red_sig in dup_reduction:
                 # remove duplicate placeholders
                 placeholders.remove("loads%d" % stage)
@@ -499,10 +499,10 @@ def _get_compound_kernel(type_args):
             else:
                 # tie each reduction signature to its stage
                 dup_reduction[red_sig] = stage
-            
+
                 # finish building the reduction stage
                 placeholders.add("reduction%d" % stage)
-            
+
             # The ops section begins a new stage
             # We could try and find the longest common op string and reuse these ops
             # along with the reduction but it's not worth the complication.
@@ -583,7 +583,7 @@ def _get_compound_kernel(type_args):
                     array_ids.add((arg_id,stage))
 
                     sig += "Pii"
-                  
+
                     # input tensors
                     if arg_i > 0:
                         ew_in = _ew_strings["in"]
@@ -650,7 +650,7 @@ def _get_compound_kernel(type_args):
                 ew_common = _common_round[mode].get(out_dtype, None)
                 if ew_common:
                     template_vals["common"].append(ew_common)
-                
+
                 template_vals["name"] += post
                 if ew_round:
                     round_val = "r%d" % arg_id
@@ -691,7 +691,7 @@ def _get_compound_kernel(type_args):
                 # add regardless of duplicate reduction stage
                 sig += "i"
                 template_vals["arguments"].append("const int n%d" % stage)
-                
+
                 # if this is a duplicate reduction just push the previous
                 # result back onto the stack.
                 if stage in dup_reduction:
@@ -727,7 +727,7 @@ def _get_compound_kernel(type_args):
     template_vals["finish"]     = "\n".join(template_vals["finish"])
     for key in ("common","arguments","inits","finish"):
         placeholders.remove(key)
-    
+
     # add the dynamic placeholders: loads#, ops#, reduction#
     for key in placeholders:
         template_vals[key]      = "\n        ".join(template_vals[key])
@@ -765,7 +765,7 @@ def call_compound_kernel(rand_state, *args):
     for arg in args:
         if type(arg) is dict:
             if arg["op"] in _reduction_ops:
-                
+
                 # To reduce a whole tensor (axis=None) reduce along each axis in succession.
                 if arg.get("axis",None) not in (0,1):
                     raise ValueError("Only reduction along an axis currently supported")
@@ -829,12 +829,12 @@ def call_compound_kernel(rand_state, *args):
                 else:
                     # support broadcast of a row vector
                     if shape[0] == 1: strides[0] = 0
-                    
+
                     # If we're traversing down the columns and this tensor has only one column,
                     # we preserve the col_stride to allow us to jump to the next row.
                     # This is probably a hack so maybe investigate this further.
                     if axis == 1:
-                        # For the common case of traversing down the rows, zero the stride to 
+                        # For the common case of traversing down the rows, zero the stride to
                         # support broadcast of column vector.
                         if shape[1] == 1: strides[1] = 0
 
@@ -858,7 +858,7 @@ def call_compound_kernel(rand_state, *args):
             op_name = arg["op"]
 
             if op_name in _float_ops:
-                
+
                 # we need to do the shape arithemtic for the current operation
                 max_shape = [1,1]
                 for op_num in range(_float_ops[op_name][0]):
@@ -882,12 +882,12 @@ def call_compound_kernel(rand_state, *args):
                         assert gridY < 2**16
                     else:
                         gridY = 1
-                    
+
                     # the axis dim is the thread loop stop condition
                     kernel_args.append(max_shape[axis])
 
                     rounding = out.rounding
-                    
+
                     # support rounding to arbitrary mantissa size
                     if rounding:
                         # convert bool to some default mantissa
@@ -923,7 +923,7 @@ def call_compound_kernel(rand_state, *args):
 
             else:
                 raise TypeError("%s is not a valid operation" % op_name)
-            
+
             op_cnt += 1
 
         else:
@@ -967,9 +967,9 @@ _compensated_sum = r"""
 %(common)s
 
 __global__ void compensated_sum(unsigned* rand_state,
-          %(type)s* a_sum, 
-          %(type)s* a_cmp, 
-    const %(type)s* a_add, 
+          %(type)s* a_sum,
+          %(type)s* a_cmp,
+    const %(type)s* a_add,
     float cmp_scale, float add_scale,
     int row_strd, int col_strd, int n, int mantissa_bits)
 {
