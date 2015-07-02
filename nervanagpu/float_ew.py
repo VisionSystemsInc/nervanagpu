@@ -306,7 +306,7 @@ _float_ops = {
     "ge"      : (2, "float {0} = {2} >= {1};"   ),
     "minimum" : (2, "float {0} = fminf({2},{1});" ),
     "maximum" : (2, "float {0} = fmaxf({2},{1});" ),
-    "pow"     : (1, "float {0} = powf({2}, {1});" ),
+    "pow"     : (2, "float {0} = powf({2},{1});"  ),
     "finite"  : (1, _is_finite ),
     "neg"     : (1, "float {0} = -{1};"         ),
     "abs"     : (1, "float {0} = abs({1});"     ),
