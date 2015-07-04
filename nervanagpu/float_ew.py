@@ -13,13 +13,14 @@
 # limitations under the License.
 
 import numpy as np
-from math import ceil
 from pycuda.compiler import SourceModule
 from pycuda.tools import context_dependent_memoize
 from pytools import memoize_method
 import pycuda.driver as drv
 import nervanagpu as ng
 # from ipdb import set_trace
+
+def ceil_div(x, y): return -(-x // y)
 
 _ew_template = r"""
 
@@ -878,7 +879,7 @@ def call_compound_kernel(rand_state, *args):
 
                     # break deep broadcast operations up into pieces tracked with blockId.y
                     if not (reduction or transpose) and max_shape[1] >= 512:
-                        gridY = int(ceil(max_shape[1] / 256.))
+                        gridY = ceil_div(max_shape[1], 256)
                         assert gridY < 2**16
                     else:
                         gridY = 1

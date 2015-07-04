@@ -16,7 +16,6 @@ import os
 import sys
 import numpy as np
 import pycuda.driver as drv
-from math import ceil
 from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
@@ -25,6 +24,8 @@ from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 
 if sys.version_info >= (3, 0):
     from functools import reduce
+
+def ceil_div(x, y): return -(-x // y)
 
 class GPUTensor(object):
 
@@ -245,7 +246,9 @@ class GPUTensor(object):
 
                 array_stride = self.strides[array_axis]
 
-                new_shape.append(int(ceil(float(stop-start)/idx_stride)))
+
+
+                new_shape.append( ceil_div(stop-start, idx_stride) )
                 new_strides.append(idx_stride*array_stride)
                 new_offset += array_stride*start
 
@@ -476,6 +479,8 @@ class GPUTensor(object):
     def __idiv__     (self, other): return OpTreeNode.build("div", self, other, out=self)
     def __itruediv__ (self, other): return OpTreeNode.build("div", self, other, out=self)
     def __ipow__     (self, other): return OpTreeNode.build("pow", self, other, out=self)
+
+    def __nonzero__  (self): raise ValueError("The truth value of an array with more than one element is ambiguous.")
 
 
 class NervanaGPU(object):
@@ -1078,6 +1083,9 @@ class OpTreeNode(tuple):
     def __abs__      (self):        return self.build("abs", self,  None)
     def __neg__      (self):        return self.build("neg", self,  None)
 
+    def __nonzero__  (self): raise ValueError("The truth value of an array with more than one element is ambiguous.")
+
+
 def _contiguous_strides(itemsize, shape):
     if shape:
         strides = [itemsize]
@@ -1138,14 +1146,14 @@ def _get_pool_kernel(path, clss, op):
     return func
 
 # debugging tool
-import re
-import traceback as tb
+# import re
+# import traceback as tb
 
-nrv_re = re.compile(r'nervanagpu\.py$')
-def print_trace():
-    caller = None
-    for frame in tb.extract_stack():
-        if GPUTensor.nrv_re.search(frame[0]):
-            break
-        caller = (frame[0],frame[1])
-    print caller
+# nrv_re = re.compile(r'nervanagpu\.py$')
+# def print_trace():
+#     caller = None
+#     for frame in tb.extract_stack():
+#         if GPUTensor.nrv_re.search(frame[0]):
+#             break
+#         caller = (frame[0],frame[1])
+#     print caller
