@@ -480,7 +480,7 @@ class GPUTensor(object):
     def __itruediv__ (self, other): return OpTreeNode.build("div", self, other, out=self)
     def __ipow__     (self, other): return OpTreeNode.build("pow", self, other, out=self)
 
-    def __nonzero__  (self): raise ValueError("The truth value of an array with more than one element is ambiguous.")
+    #def __nonzero__  (self): raise ValueError("The truth value of an array with more than one element is ambiguous.")
 
 
 class NervanaGPU(object):
@@ -1083,7 +1083,7 @@ class OpTreeNode(tuple):
     def __abs__      (self):        return self.build("abs", self,  None)
     def __neg__      (self):        return self.build("neg", self,  None)
 
-    def __nonzero__  (self): raise ValueError("The truth value of an array with more than one element is ambiguous.")
+    #def __nonzero__  (self): raise ValueError("The truth value of an array with more than one element is ambiguous.")
 
 
 def _contiguous_strides(itemsize, shape):

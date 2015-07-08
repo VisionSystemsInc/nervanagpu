@@ -28,6 +28,8 @@ _ew_template = r"""
 
 %(common)s
 
+#define THREADS %(threads)s
+
 __global__ void %(name)s (
     unsigned* rand_state,
     %(arguments)s)
@@ -37,45 +39,78 @@ __global__ void %(name)s (
     const int b256 = blockIdx.y << 8;
     const int col_offset = b256 + tid;
 
+    extern __shared__ float sPartials[];
+
     %(inits)s
 """
 
 _stage_template = {
     "loop" : r"""
 
-    for (int i = tid; i < n{0}; i += 32)
+    for (int i = tid; i < n{0}; i += THREADS)
     {{
         %(loads{0})s
 
         %(ops{0})s
     }}
 """,
+
     "bc_loop" : r"""
 
     int end_val{0};
     asm("min.s32 %%0, %%1, %%2;" : "=r"(end_val{0}) : "r"(n{0}), "r"(b256 + 256));
     const int end{0} = end_val{0};
 
-    for (int i = col_offset; i < end{0}; i += 32)
+    for (int i = col_offset; i < end{0}; i += THREADS)
     {{
         %(loads{0})s
 
         %(ops{0})s
     }}
 """,
-    "red" :r"""
+
+    "red32" :r"""
 
     #pragma unroll
     for (int i = 16; i > 0; i >>= 1)
     {{
-        %(reduction{0})s
+        %(shfl_red{0})s
     }}
 
 """,
+
+    "red" :r"""
+
+    sPartials[tid] = %(var_red{0})s;
+    __syncthreads();
+
+    #pragma unroll
+    for (int a = THREADS >> 1; a > 32; a >>= 1)
+    {{
+        if ( tid < a )
+            %(share1_red{0})s
+        __syncthreads();
+    }}
+
+    if ( tid < 32 )
+    {{
+        %(share2_red{0})s
+
+        #pragma unroll
+        for (int i = 16; i > 0; i >>= 1)
+            %(shfl_red{0})s
+
+        sPartials[tid] = %(var_red{0})s;
+    }}
+    __syncthreads();
+    %(var_red{0})s = sPartials[0];
+""",
+
     "red_ops" :r"""
 
     %(ops{0})s
 """,
+
     "red_out" : r"""
 
     if ( tid == 0 )
@@ -92,7 +127,7 @@ _fin_template = r"""
 
 _init_rand_func = r"""
     unsigned lfsr0, lfsr1, lfsr2;
-    unsigned idx = bid * 32 + tid;
+    unsigned idx = bid * THREADS + tid;
     rand_state += idx % (2048*32);
     lfsr0 = *rand_state;
     asm("mov.b32 %0, %%clock;"          : "=r"(lfsr1) :);
@@ -256,14 +291,14 @@ _ew_strings = {
     "in" : {
         "arguments" : "const {2}* a{0}_in, int row_strd{0}, int col_strd{0}",
         "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0} + col_offset * col_strd{0};\n"
-                  "    int a{0}_inc{1} = 32 * col_strd{0};",
+                  "    int a{0}_inc{1} = THREADS * col_strd{0};",
         "loads"     : "float a{0} = {3}(__ldg(a{0}_in{1}));\n"
               "        a{0}_in{1} += a{0}_inc{1};",
     },
     "out" : {
         "arguments" : "{2}* a_out, int row_strd, int col_strd",
         "inits"     : "a_out += bid * row_strd + col_offset * col_strd;\n"
-                  "    int out_inc = 32 * col_strd;",
+                  "    int out_inc = THREADS * col_strd;",
     },
     "const" : {
         "arguments" : "float c{0}",
@@ -327,31 +362,37 @@ _float_ops = {
 
 _reduction_ops = {
     "sum" : {
-        "inits"     : "float {0} = 0.0f;",
-        "ops"       : "{0} += {1};",
-        "reduction" : "{0} += __shfl_xor({0}, i);",
+        "inits"      : "float {0} = 0.0f;",
+        "ops"        : "{0} += {1};",
+        "shfl_red"   : "{0} += __shfl_xor({0}, i);",
+        "share1_red" : "sPartials[tid] += sPartials[tid + a];",
+        "share2_red" : "{0} = sPartials[tid] + sPartials[tid + 32];",
     },
     "max" : {
-        "inits"     : "float {0} = -FLT_MAX;",
-        "ops"       : "{0} = fmaxf({0}, {1});",
-        "reduction" : "{0} = fmaxf({0}, __shfl_xor({0}, i));",
+        "inits"      : "float {0} = -FLT_MAX;",
+        "ops"        : "{0} = fmaxf({0}, {1});",
+        "shfl_red"   : "{0} = fmaxf({0}, __shfl_xor({0}, i));",
+        "share1_red" : "sPartials[tid] = fmaxf(sPartials[tid], sPartials[tid + a]);",
+        "share2_red" : "{0} = fmaxf(sPartials[tid], sPartials[tid + 32]);",
     },
     "min" : {
-        "inits"     : "float {0} = FLT_MAX;",
-        "ops"       : "{0} = fminf({0}, {1});",
-        "reduction" : "{0} = fminf({0}, __shfl_xor({0}, i));",
+        "inits"      : "float {0} = FLT_MAX;",
+        "ops"        : "{0} = fminf({0}, {1});",
+        "shfl_red"   : "{0} = fminf({0}, __shfl_xor({0}, i));",
+        "share1_red" : "sPartials[tid] = fminf(sPartials[tid], sPartials[tid + a]);",
+        "share2_red" : "{0} = fminf(sPartials[tid], sPartials[tid + 32]);",
     },
     "argmax" : {
         "inits"     : "float {0} = -1.0f, max = -FLT_MAX;",
         "ops"       : "if ({1} > max) {{ max = {1}; {0} = i; }}",
-        "reduction" : "float max2 = __shfl_xor(max, i), argMax2 = __shfl_xor({0}, i);\n"
+        "shfl_red"  : "float max2 = __shfl_xor(max, i), argMax2 = __shfl_xor({0}, i);\n"
               "        if (max2 > max) {{ max = max2; {0} = argMax2; }}"
               "        else if (max2 == max && argMax2 < {0}) {{ {0} = argMax2; }}",
     },
     "argmin" : {
         "inits"     : "float {0} = -1.0f, min = FLT_MAX;",
         "ops"       : "if ({1} < min) {{ min = {1}; {0} = i; }}",
-        "reduction" : "float min2 = __shfl_xor(min, i), argMin2 = __shfl_xor({0}, i);\n"
+        "shfl_red"  : "float min2 = __shfl_xor(min, i), argMin2 = __shfl_xor({0}, i);\n"
               "        if (min2 < min) {{ min = min2; {0} = argMin2; }}"
               "        else if (min2 == min && argMin2 < {0}) {{ {0} = argMin2; }}",
     },
@@ -401,6 +442,7 @@ def _get_compound_kernel(type_args):
     stage_type     = "loop"
     stage          = 0
     stack          = []
+    threads        = type_args[-1][4]
 
     # single loop broadcast operation
     if type_args[-1][3]:
@@ -502,7 +544,11 @@ def _get_compound_kernel(type_args):
                 dup_reduction[red_sig] = stage
 
                 # finish building the reduction stage
-                placeholders.add("reduction%d" % stage)
+                placeholders.add("shfl_red%d" % stage)
+                if threads > 32:
+                    placeholders.add("var_red%d"    % stage)
+                    placeholders.add("share1_red%d" % stage)
+                    placeholders.add("share2_red%d" % stage)
 
             # The ops section begins a new stage
             # We could try and find the longest common op string and reuse these ops
@@ -532,7 +578,7 @@ def _get_compound_kernel(type_args):
     stack         = []
     red_regsiters = {}
     template      = _ew_template
-    template_vals = { "name" : "kernel_" }
+    template_vals = { "name" : "kernel_", "threads" : threads }
     for key in placeholders:
         template_vals[key] = []
 
@@ -553,7 +599,10 @@ def _get_compound_kernel(type_args):
                 # the reduction op shares the stage with its loop
                 # so append that separately here.
                 if arg_type in _reduction_ops:
-                    template += _stage_template["red"].format(stage)
+                    if threads > 32:
+                        template += _stage_template["red"].format(stage)
+                    else:
+                        template += _stage_template["red32"].format(stage)
             else:
                 current_stage = stage_map[arg_i]
 
@@ -700,16 +749,22 @@ def _get_compound_kernel(type_args):
                 # Otherwise fill out the reduction template
                 else:
 
-                    ops = "ops%d" % stage
-                    red = "reduction%d" % stage
-
-                    red_arg     = "r%d" % arg_id
+                    ops         = "ops%d"      % stage
+                    shfl_red    = "shfl_red%d" % stage
+                    red_arg     = "r%d"        % arg_id
                     red_strings = _reduction_ops[arg_type]
                     stack_arg   = stack.pop()
 
-                    template_vals["inits"].append(red_strings["inits"    ].format(red_arg))
-                    template_vals[ops    ].append(red_strings["ops"      ].format(red_arg, stack_arg))
-                    template_vals[red    ].append(red_strings["reduction"].format(red_arg))
+                    template_vals["inits" ].append(red_strings["inits"   ].format(red_arg))
+                    template_vals[ops     ].append(red_strings["ops"     ].format(red_arg, stack_arg))
+                    template_vals[shfl_red].append(red_strings["shfl_red"].format(red_arg))
+                    if threads > 32:
+                        var_red  = "var_red%d"    % stage
+                        shr1_red = "share1_red%d" % stage
+                        shr2_red = "share2_red%d" % stage
+                        template_vals[var_red ].append(red_arg)
+                        template_vals[shr1_red].append(red_strings["share1_red"].format(red_arg))
+                        template_vals[shr2_red].append(red_strings["share2_red"].format(red_arg))
 
                     stack.append(red_arg)
 
@@ -756,16 +811,22 @@ def call_compound_kernel(rand_state, *args):
     kernel_args = [ rand_state, ]
     type_args   = []
     shape_stack = []
+    threads     = 32
+    red_depth   = 0
     # Apply reduction constraints and determine thread axis
     # Blocks will be allocated counter to this axis
     # Also detect if this is a broadcast or transpose op.
     reduction = False
     broadcast = False
     transpose = False
+    argminmax = False
     axis = 1
     for arg in args:
         if type(arg) is dict:
             if arg["op"] in _reduction_ops:
+
+                if arg["op"] in ("argmax", "argmin"):
+                    argminmax = True
 
                 # To reduce a whole tensor (axis=None) reduce along each axis in succession.
                 if arg.get("axis",None) not in (0,1):
@@ -778,6 +839,7 @@ def call_compound_kernel(rand_state, *args):
                 else:
                     reduction = True
                     axis = arg["axis"]
+
         elif isinstance(arg, ng.GPUTensor):
             if len(arg.shape) < 2 or arg.shape[0] == 1 or arg.shape[1] == 1:
                 broadcast = True
@@ -901,7 +963,15 @@ def call_compound_kernel(rand_state, *args):
 
                         kernel_args.append(max(rounding,1))
 
-                    type_args.append((op_name, op_cnt, rounding > 0, gridY > 1))
+                    # speed up deep reduction by using more than 32 threads
+                    if reduction and not argminmax:
+                        if   red_depth >= 4096: threads = 1024
+                        elif red_depth >= 2048: threads = 512
+                        elif red_depth >= 1024: threads = 256
+                        elif red_depth >=  512: threads = 128
+                        elif red_depth >=  256: threads = 64
+
+                    type_args.append((op_name, op_cnt, rounding > 0, gridY > 1, threads))
 
                 else:
                     type_args.append((op_name, op_cnt))
@@ -910,6 +980,8 @@ def call_compound_kernel(rand_state, *args):
             elif op_name in _reduction_ops:
 
                 shape = list(shape_stack.pop())
+
+                red_depth = max(red_depth, shape[axis])
 
                 # Allow a new axis size if doing post reduction broadcast.
                 # So we need to know the axis size prior to reduction.
@@ -941,6 +1013,8 @@ def call_compound_kernel(rand_state, *args):
 
     #import ipdb; ipdb.set_trace()
 
+    shared = threads * 4 if threads > 32 else 0
+
     if out.backend.bench:
         repeat = out.backend.bench
         start, end = ng._get_events()
@@ -953,7 +1027,7 @@ def call_compound_kernel(rand_state, *args):
         # call the kernel with the number of blocks set as the size of the off-axis
         # Maxwell does well with 32 thread sized blocks, no need to autotune.
         #for a in kernel_args: print a
-        kernel.prepared_async_call((max_shape[1-axis],gridY,1), (32,1,1), out.backend.stream, *kernel_args)
+        kernel.prepared_async_call((max_shape[1-axis],gridY,1), (threads,1,1), out.backend.stream, *kernel_args, shared_size=shared)
 
     if out.backend.bench:
         end.record(out.backend.stream)
