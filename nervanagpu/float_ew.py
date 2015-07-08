@@ -20,8 +20,6 @@ import pycuda.driver as drv
 import nervanagpu as ng
 # from ipdb import set_trace
 
-def ceil_div(x, y): return -(-x // y)
-
 _ew_template = r"""
 
 #include <float.h>
@@ -36,8 +34,6 @@ __global__ void %(name)s (
 {
     const int tid  = threadIdx.x;
     const int bid  = blockIdx.x;
-    const int b256 = blockIdx.y << 8;
-    const int col_offset = b256 + tid;
 
     extern __shared__ float sPartials[];
 
@@ -48,20 +44,6 @@ _stage_template = {
     "loop" : r"""
 
     for (int i = tid; i < n{0}; i += THREADS)
-    {{
-        %(loads{0})s
-
-        %(ops{0})s
-    }}
-""",
-
-    "bc_loop" : r"""
-
-    int end_val{0};
-    asm("min.s32 %%0, %%1, %%2;" : "=r"(end_val{0}) : "r"(n{0}), "r"(b256 + 256));
-    const int end{0} = end_val{0};
-
-    for (int i = col_offset; i < end{0}; i += THREADS)
     {{
         %(loads{0})s
 
@@ -290,14 +272,14 @@ _ew_strings = {
     # 0: arg_id, 1: stage, 2: type, 3: cvt
     "in" : {
         "arguments" : "const {2}* a{0}_in, int row_strd{0}, int col_strd{0}",
-        "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0} + col_offset * col_strd{0};\n"
+        "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0} + tid * col_strd{0};\n"
                   "    int a{0}_inc{1} = THREADS * col_strd{0};",
         "loads"     : "float a{0} = {3}(__ldg(a{0}_in{1}));\n"
               "        a{0}_in{1} += a{0}_inc{1};",
     },
     "out" : {
         "arguments" : "{2}* a_out, int row_strd, int col_strd",
-        "inits"     : "a_out += bid * row_strd + col_offset * col_strd;\n"
+        "inits"     : "a_out += bid * row_strd + tid * col_strd;\n"
                   "    int out_inc = THREADS * col_strd;",
     },
     "const" : {
@@ -442,11 +424,7 @@ def _get_compound_kernel(type_args):
     stage_type     = "loop"
     stage          = 0
     stack          = []
-    threads        = type_args[-1][4]
-
-    # single loop broadcast operation
-    if type_args[-1][3]:
-        stage_type = "bc_loop"
+    threads        = type_args[-1][3]
 
     # Do a first pass over the stack to find out to which stage each
     # tensor and operation belong.
@@ -939,13 +917,6 @@ def call_compound_kernel(rand_state, *args):
 
                 if op_name == "assign":
 
-                    # break deep broadcast operations up into pieces tracked with blockId.y
-                    if not (reduction or transpose) and max_shape[1] >= 512:
-                        gridY = ceil_div(max_shape[1], 256)
-                        assert gridY < 2**16
-                    else:
-                        gridY = 1
-
                     # the axis dim is the thread loop stop condition
                     kernel_args.append(max_shape[axis])
 
@@ -957,7 +928,7 @@ def call_compound_kernel(rand_state, *args):
                         if rounding is True:
                             rounding = 10
                         elif out.dtype.type is np.float32:
-                            rounding = min(rounding,22)
+                            rounding = min(rounding,15)
                         elif out.dtype.type is np.float16:
                             rounding = min(rounding,10)
 
@@ -971,7 +942,11 @@ def call_compound_kernel(rand_state, *args):
                         elif red_depth >=  512: threads = 128
                         elif red_depth >=  256: threads = 64
 
-                    type_args.append((op_name, op_cnt, rounding > 0, gridY > 1, threads))
+                    # speed up deep broadcast by using more than 32 threads
+                    elif not (reduction or transpose) and max_shape[1] >= 512:
+                        threads = 256
+
+                    type_args.append((op_name, op_cnt, rounding > 0, threads))
 
                 else:
                     type_args.append((op_name, op_cnt))
@@ -1013,7 +988,7 @@ def call_compound_kernel(rand_state, *args):
 
     #import ipdb; ipdb.set_trace()
 
-    shared = threads * 4 if threads > 32 else 0
+    shared = threads * 4 if reduction and threads > 32 else 0
 
     if out.backend.bench:
         repeat = out.backend.bench
@@ -1027,13 +1002,13 @@ def call_compound_kernel(rand_state, *args):
         # call the kernel with the number of blocks set as the size of the off-axis
         # Maxwell does well with 32 thread sized blocks, no need to autotune.
         #for a in kernel_args: print a
-        kernel.prepared_async_call((max_shape[1-axis],gridY,1), (threads,1,1), out.backend.stream, *kernel_args, shared_size=shared)
+        kernel.prepared_async_call((max_shape[1-axis],1,1), (threads,1,1), out.backend.stream, *kernel_args, shared_size=shared)
 
     if out.backend.bench:
         end.record(out.backend.stream)
         end.synchronize()
         msecs = end.time_since(start) / repeat
-        print("%7.3f msecs shape(%d,%d) grid(%d,%d) %s" % (msecs, max_shape[0], max_shape[1], max_shape[1-axis], gridY, kernel.name))
+        print("%7.3f msecs shape(%d,%d) blk,thd(%d,%d) %s" % (msecs, max_shape[0], max_shape[1], max_shape[1-axis], threads, kernel.name))
 
     return out
 
