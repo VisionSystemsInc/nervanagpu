@@ -25,22 +25,23 @@ from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 if sys.version_info >= (3, 0):
     from functools import reduce
 
-def ceil_div(x, y): return -(-x // y)
+_none_slice = slice(None,None,None)
 
 class GPUTensor(object):
 
     def __init__(self, backend, shape,
-                dtype     = np.float16,
-                allocator = drv.mem_alloc,
-                base      = None,
-                gpudata   = None,
-                strides   = None,
-                is_trans  = False,
-                name      = None,
-                rounding  = 0):
+                dtype      = np.float16,
+                allocator  = drv.mem_alloc,
+                base       = None,
+                gpudata    = None,
+                strides    = None,
+                take_array = None,
+                is_trans   = False,
+                name       = None,
+                rounding   = 0):
 
         # supported dtypes
-        assert dtype in (np.float16, np.float32, np.uint8, np.int8)
+        assert dtype in (np.float16, np.float32, np.uint8, np.int8, np.int32)
 
         dtype = np.dtype(dtype)
 
@@ -69,6 +70,7 @@ class GPUTensor(object):
         self.dtype       = dtype
         self.nbytes      = dtype.itemsize * size
         self.allocator   = allocator
+        self.take_array  = take_array
         self.is_trans    = is_trans
         self.name        = name
         self.rounding    = rounding
@@ -77,7 +79,7 @@ class GPUTensor(object):
 
         # calculate dims that are efficient for elementwise ops
         # (that don't involve a reduction or broadcast along an axis)
-        if len(shape) == 2 and (size < 256*16 or is_trans or shape[0] == 1 or shape[1] == 1):
+        if len(shape) == 2 and (size < 256*16 or is_trans or shape[0] == 1 or shape[1] == 1 or take_array):
             self.shape_ew   = shape
             self.strides_ew = self.strides
         else:
@@ -163,7 +165,7 @@ class GPUTensor(object):
     @property
     @memoize_method
     def is_contiguous(self):
-        return self.strides == _contiguous_strides(self.dtype.itemsize, self.shape)
+        return not self.take_array and self.strides == _contiguous_strides(self.dtype.itemsize, self.shape) 
 
     def set(self, ary, device=None):
         """
@@ -216,13 +218,23 @@ class GPUTensor(object):
         """
         return self.gpudata.as_buffer(self.nbytes)
 
+    def take(self, indices, axis, out=None):
+        if axis == 1:
+            view = self.__getitem__((_none_slice, indices))
+        else:
+            view = self.__getitem__((indices, _none_slice))
+
+        if out:
+            return out._assign(view)
+        return view
+
     def __getitem__(self, index):
         """
         return a sliced view of an array
         """
         if not isinstance(index, tuple):
             # speed up common case of [:]
-            if index == slice(None,None,None):
+            if index == _none_slice:
                 return self
             index = (index,)
 
@@ -231,6 +243,7 @@ class GPUTensor(object):
         new_strides = []
 
         seen_ellipsis = False
+        take_array = None
 
         index_axis = 0
         array_axis = 0
@@ -240,17 +253,40 @@ class GPUTensor(object):
             if array_axis > len(self.shape):
                 raise IndexError("too many axes in index")
 
+            # Standard slicing (start:stop:step)
             if isinstance(index_entry, slice):
-                start, stop, idx_stride = index_entry.indices(
-                        self.shape[array_axis])
+                start, stop, idx_stride = index_entry.indices(self.shape[array_axis])
 
                 array_stride = self.strides[array_axis]
 
-
-
-                new_shape.append( ceil_div(stop-start, idx_stride) )
+                # def ceil_div(x, y): return -(-x // y)
+                new_shape.append( -((start-stop) // idx_stride) )
                 new_strides.append(idx_stride*array_stride)
                 new_offset += array_stride*start
+
+                index_axis += 1
+                array_axis += 1
+
+            # Fancy indexing
+            elif isinstance(index_entry, (GPUTensor, np.ndarray, list, tuple)):
+                
+                if isinstance(index_entry, (list, tuple)):
+                    index_entry = np.array(index_entry, dtype=np.int32)
+
+                if isinstance(index_entry, np.ndarray):
+                    index_entry = self.__class__(self.backend, index_entry.shape, dtype=np.int32).set(index_entry)
+
+                size = max(index_entry.shape)
+                if size != index_entry.size:
+                    raise IndexError("Fancy indexing only currently supported for dim > 1 in a single dimension.")
+
+                if take_array is not None:
+                    raise IndexError("Fancy indexing only currently supported for one axis at a time.")
+
+                take_array = (index_entry, array_axis)
+
+                new_shape.append(size)
+                new_strides.append(self.strides[array_axis])
 
                 index_axis += 1
                 array_axis += 1
@@ -261,8 +297,7 @@ class GPUTensor(object):
                     index_entry += array_shape
 
                 if not (0 <= index_entry < array_shape):
-                    raise IndexError(
-                            "subindex in axis %d out of range" % index_axis)
+                    raise IndexError("subindex in axis %d out of range" % index_axis)
 
                 new_offset += self.strides[array_axis]*index_entry
 
@@ -282,8 +317,7 @@ class GPUTensor(object):
                     array_axis += 1
 
                 if seen_ellipsis:
-                    raise IndexError(
-                            "more than one ellipsis not allowed in index")
+                    raise IndexError("more than one ellipsis not allowed in index")
                 seen_ellipsis = True
 
             else:
@@ -303,6 +337,7 @@ class GPUTensor(object):
                 base       = self,
                 gpudata    = int(self.gpudata)+new_offset,
                 strides    = new_strides,
+                take_array = take_array,
                 name       = self.name,
                 rounding   = self.rounding)
 
@@ -372,7 +407,7 @@ class GPUTensor(object):
         """
         return a reshaped view
         """
-        if isinstance(shape[0], tuple) or isinstance(shape[0], list):
+        if isinstance(shape[0], (tuple,list)):
             shape = tuple(shape[0])
 
         if shape == self.shape:
@@ -986,6 +1021,9 @@ class NervanaGPU(object):
 
     def dropout(self, keep=0.5, out=None):
         return self.less_equal(self.rand(), keep, out=out)
+
+    def take(self, a, indices, axis, out=None):
+        return a.take(indices, axis, out)
 
 
 # For constructing an op tree used in lazy evaluation

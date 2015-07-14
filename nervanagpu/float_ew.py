@@ -228,6 +228,14 @@ __device__ __forceinline__ unsigned char fp32_to_uint8(float val)
     return ret;
 }
 """,
+        "i4" : r"""
+__device__ __forceinline__ int fp32_to_int32(float val)
+{
+    int ret;
+    asm("cvt.rni.s32.f32 %0, %1;" : "=r"(ret) : "f"(val));
+    return ret;
+}
+""",
     },
 }
 # random rounding not used for these types
@@ -265,22 +273,56 @@ _ew_types = {
         "type" : "unsigned char",
         "cvt"  : "(float)",
     },
+    "i4" : {
+        "type" : "int",
+        "cvt"  : "(float)",
+    },
 }
 
 _ew_strings = {
 
     # 0: arg_id, 1: stage, 2: type, 3: cvt
-    "in" : {
+    "in0" : {
         "arguments" : "const {2}* a{0}_in, int row_strd{0}, int col_strd{0}",
         "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0} + tid * col_strd{0};\n"
                   "    int a{0}_inc{1} = THREADS * col_strd{0};",
         "loads"     : "float a{0} = {3}(__ldg(a{0}_in{1}));\n"
               "        a{0}_in{1} += a{0}_inc{1};",
     },
-    "out" : {
+    "in1" : {
+        "arguments" : "const {2}* a{0}_in, int row_strd{0}, int col_strd{0}, const int* take{0}_in",
+        "inits"     : "const {2}* a{0}_in{1} = a{0}_in + __ldg(take{0}_in + bid) * row_strd{0} + tid * col_strd{0};\n"
+                  "    int a{0}_inc{1} = THREADS * col_strd{0};",
+        "loads"     : "float a{0} = {3}(__ldg(a{0}_in{1}));\n"
+              "        a{0}_in{1} += a{0}_inc{1};",
+    },
+    "in2" : {
+        "arguments" : "const {2}* a{0}_in, int row_strd{0}, int col_strd{0}, const int* take{0}_in",
+        "inits"     : "const {2}* a{0}_in{1} = a{0}_in + bid * row_strd{0};\n"
+                  "    const int* take{0}_in{1} = take{0}_in + tid;",
+        "loads"     : "float a{0} = {3}(__ldg(a{0}_in{1} + __ldg(take{0}_in{1})));\n"
+              "        take{0}_in{1} += THREADS;",
+    },
+    "out0" : {
         "arguments" : "{2}* a_out, int row_strd, int col_strd",
         "inits"     : "a_out += bid * row_strd + tid * col_strd;\n"
                   "    int out_inc = THREADS * col_strd;",
+        "output"    : "*a_out = {0};\n        a_out += out_inc;",
+    },
+    "out1" : {
+        "arguments" : "{2}* a_out, int row_strd, int col_strd, const int* take_out",
+        "inits"     : "a_out += __ldg(take_out + bid) * row_strd + tid * col_strd;\n"
+                  "    int out_inc = THREADS * col_strd;",
+        "output"    : "*a_out = {0};\n        a_out += out_inc;",
+
+    },
+    "out2" : {
+        "arguments" : "{2}* a_out, int row_strd, int col_strd, const int* take_out",
+        "inits"     : "a_out += bid * row_strd;\n"
+                  "    take_out += tid;",
+
+        "output"    : "*(a_out + __ldg(take_out)) = {0};\n        take_out += THREADS;",
+
     },
     "const" : {
         "arguments" : "float c{0}",
@@ -291,11 +333,13 @@ _ew_strings = {
             "f2"  : "unsigned short {0} = fp32_to_fp16_rand({1}, lfsr0, lfsr1, lfsr2, rand_scale, rand_mask);",
             "i1"  : "char {0}           = fp32_to_int8({1});",
             "u1"  : "unsigned char {0}  = fp32_to_uint8({1});",
+            "i4"  : "int {0}            = fp32_to_int32({1});",
         },
         "nearest" : {
             "f2"  : "unsigned short {0} = fp32_to_fp16({1});",
             "i1"  : "char {0}           = fp32_to_int8({1});",
             "u1"  : "unsigned char {0}  = fp32_to_uint8({1});",
+            "i4"  : "int {0}            = fp32_to_int32({1});",
         },
     },
 }
@@ -311,7 +355,7 @@ asm("{{\n\t"
 
 # Note: binary operands come off the stack in reverse order
 _float_ops = {
-    "assign"  : (2, "*a_out = {0};\n        a_out += out_inc;" ),
+    "assign"  : (2, "unused" ),
     "add"     : (2, 'float {0} = {2} + {1};' ),
     "sub"     : (2, 'float {0} = {2} - {1};' ),
     "mul"     : (2, 'float {0} = {2} * {1};' ),
@@ -365,16 +409,16 @@ _reduction_ops = {
         "share2_red" : "{0} = fminf(sPartials[tid], sPartials[tid + 32]);",
     },
     "argmax" : {
-        "inits"     : "float {0} = -1.0f, max = -FLT_MAX;",
+        "inits"     : "int {0} = -1; float max = -FLT_MAX;",
         "ops"       : "if ({1} > max) {{ max = {1}; {0} = i; }}",
-        "shfl_red"  : "float max2 = __shfl_xor(max, i), argMax2 = __shfl_xor({0}, i);\n"
+        "shfl_red"  : "float max2 = __shfl_xor(max, i); int argMax2 = __shfl_xor({0}, i);\n"
               "        if (max2 > max) {{ max = max2; {0} = argMax2; }}"
               "        else if (max2 == max && argMax2 < {0}) {{ {0} = argMax2; }}",
     },
     "argmin" : {
-        "inits"     : "float {0} = -1.0f, min = FLT_MAX;",
+        "inits"     : "int {0} = -1; float min = FLT_MAX;",
         "ops"       : "if ({1} < min) {{ min = {1}; {0} = i; }}",
-        "shfl_red"  : "float min2 = __shfl_xor(min, i), argMin2 = __shfl_xor({0}, i);\n"
+        "shfl_red"  : "float min2 = __shfl_xor(min, i); int argMin2 = __shfl_xor({0}, i);\n"
               "        if (min2 < min) {{ min = min2; {0} = argMin2; }}"
               "        else if (min2 == min && argMin2 < {0}) {{ {0} = argMin2; }}",
     },
@@ -398,11 +442,10 @@ def _get_module(template, template_vals):
 
     code = template % template_vals
 
-    # f = open("kernel.cu", "w")
+    # # f = open("kernel.cu", "w")
     # f = open("%s.cu" % template_vals["name"], "w")
     # print >>f, code
     # f.close()
-
     # print "Compiling %s %s" % (template_vals["name"], _get_trace())
 
     return SourceModule(code, options=[ "--use_fast_math" ], keep=False) #,"-G"
@@ -587,7 +630,7 @@ def _get_compound_kernel(type_args):
         # Array operands
         if arg_type is ng.GPUTensor:
 
-            dtype = arg[2]
+            dtype, take_axis = arg[2:4]
 
             #TODO: need to be able to handle more than 26 params..
             template_vals["name"] += dtype + chr(ord("A") + arg_id)
@@ -599,6 +642,7 @@ def _get_compound_kernel(type_args):
                     stack.append("a%d" % arg_id)
                 else:
                     out_dtype = dtype
+                    out_take  = take_axis
 
                 # 0: arg_id, 1: stage, 2: type, 3: cvt
                 ew_dtype = _ew_types[dtype]
@@ -611,18 +655,21 @@ def _get_compound_kernel(type_args):
                     array_ids.add((arg_id,stage))
 
                     sig += "Pii"
+                    if take_axis > 0:
+                        sig += "P"
 
                     # input tensors
                     if arg_i > 0:
-                        ew_in = _ew_strings["in"]
+                        ew_in = _ew_strings["in%d" % take_axis]
                         loads = "loads%d" % stage
                         template_vals["arguments"].append(ew_in["arguments"].format(*fmt))
                         template_vals["inits"    ].append(ew_in["inits"    ].format(*fmt))
                         template_vals[loads      ].append(ew_in["loads"    ].format(*fmt))
                     # output tensor
                     else:
+                        ew_out = _ew_strings["out%d" % take_axis]
                         for key in ("arguments","inits"):
-                            template_vals[key].append(_ew_strings["out"][key].format(*fmt))
+                            template_vals[key].append(ew_out[key].format(*fmt))
 
                     if dtype == 'f2' and not fp16In:
                         template_vals["common"].append(_common_fp16_to_fp32)
@@ -674,10 +721,13 @@ def _get_compound_kernel(type_args):
                     post = "rn"
 
                 out_val   = stack.pop()
-                ew_round  = _ew_strings["round"][mode].get(out_dtype, None)
-                ew_common = _common_round[mode].get(out_dtype, None)
-                if ew_common:
-                    template_vals["common"].append(ew_common)
+                if out_val[0] == "i" and out_dtype == "i4":
+                    ew_round = None
+                else:
+                    ew_round  = _ew_strings["round"][mode].get(out_dtype, None)
+                    ew_common = _common_round[mode].get(out_dtype, None)
+                    if ew_common:
+                        template_vals["common"].append(ew_common)
 
                 template_vals["name"] += post
                 if ew_round:
@@ -686,7 +736,7 @@ def _get_compound_kernel(type_args):
                 else:
                     round_val = out_val
 
-                template_vals[ops].append(_float_ops[arg_type][1].format(round_val))
+                template_vals[ops].append(_ew_strings["out%d" % out_take]["output"].format(round_val))
 
             elif arg_type in _float_ops:
 
@@ -726,10 +776,11 @@ def _get_compound_kernel(type_args):
                     stack.append(red_regsiters[dup_reduction[stage]])
                 # Otherwise fill out the reduction template
                 else:
+                    reg = "i" if "arg" == arg_type[0:3] else "r"
 
                     ops         = "ops%d"      % stage
                     shfl_red    = "shfl_red%d" % stage
-                    red_arg     = "r%d"        % arg_id
+                    red_arg     = "%s%d"       % (reg, arg_id)
                     red_strings = _reduction_ops[arg_type]
                     stack_arg   = stack.pop()
 
@@ -798,12 +849,13 @@ def call_compound_kernel(rand_state, *args):
     broadcast = False
     transpose = False
     argminmax = False
+    takeop    = False
     axis = 1
     for arg in args:
         if type(arg) is dict:
             if arg["op"] in _reduction_ops:
 
-                if arg["op"] in ("argmax", "argmin"):
+                if arg["op"][0:3] == "arg":
                     argminmax = True
 
                 # To reduce a whole tensor (axis=None) reduce along each axis in succession.
@@ -823,6 +875,8 @@ def call_compound_kernel(rand_state, *args):
                 broadcast = True
             elif arg.is_trans:
                 transpose = True
+            elif arg.take_array:
+                takeop = True
 
 
     # If reducing along axis 0 we need to reverse all strides.
@@ -835,7 +889,7 @@ def call_compound_kernel(rand_state, *args):
         if isinstance(arg, ng.GPUTensor):
 
             # use the more efficient dimensions if this is a plain ew op.
-            if len(arg.shape) == 2 and (broadcast or reduction or transpose):
+            if len(arg.shape) == 2 and (broadcast or reduction or transpose or takeop):
                 shape   = arg.shape
                 strides = arg.strides
             else:
@@ -879,9 +933,17 @@ def call_compound_kernel(rand_state, *args):
                         # support broadcast of column vector.
                         if shape[1] == 1: strides[1] = 0
 
-                kernel_args.extend((arg.gpudata, strides[0], strides[1]))
+                if arg.take_array:
+                    kernel_args.extend((arg.gpudata, strides[0], strides[1], arg.take_array[0].gpudata))
+                else:
+                    kernel_args.extend((arg.gpudata, strides[0], strides[1]))
 
-            type_args.append((ng.GPUTensor, indx, arg.dtype.str[1:]))
+            if arg.take_array:
+                take_axis = arg.take_array[1] + 1
+            else:
+                take_axis = 0
+
+            type_args.append((ng.GPUTensor, indx, arg.dtype.str[1:], take_axis))
 
             shape_stack.append(shape)
 
