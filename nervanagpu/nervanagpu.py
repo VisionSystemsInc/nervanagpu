@@ -283,6 +283,9 @@ class GPUTensor(object):
                 if take_array is not None:
                     raise IndexError("Fancy indexing only currently supported for one axis at a time.")
 
+                if index_entry.dtype.type is not np.int32:
+                    raise IndexError("Fancy indexing only currently supported with int32 types.")
+
                 take_array = (index_entry, array_axis)
 
                 new_shape.append(size)

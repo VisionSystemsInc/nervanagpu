@@ -939,6 +939,9 @@ def call_compound_kernel(rand_state, *args):
                     kernel_args.extend((arg.gpudata, strides[0], strides[1]))
 
             if arg.take_array:
+                if reduction and axis != 1:
+                    raise ValueError("Take operations not supported with axis 0 reductions.")
+
                 take_axis = arg.take_array[1] + 1
             else:
                 take_axis = 0
