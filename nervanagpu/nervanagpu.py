@@ -524,7 +524,8 @@ class GPUTensor(object):
 class NervanaGPU(object):
 
     def __init__(self, stochastic_round=False, bench=False,
-                 cubin_path=os.path.join("kernels", "cubin")):
+                 cubin_path=os.path.join("kernels", "cubin"),
+                 default_dtype=np.float16):
         """
         NervanaGPU: the primary interface class and factory for GPUTensors
 
@@ -543,29 +544,30 @@ class NervanaGPU(object):
         self.cubin_path = os.path.join(os.path.dirname(__file__), cubin_path)
         self.bench = bench
         self.stream = None
+        self.default_dtype = default_dtype
 
-    def empty(self, shape, dtype=np.float16, name=None, allocator=drv.mem_alloc):
+    def empty(self, shape, dtype=self.default_dtype, name=None, allocator=drv.mem_alloc):
         """
         allocate the space for a GPUTensor
         """
         return GPUTensor(self, shape, dtype, allocator=allocator,
                           name=name, rounding=self.round_mode)
 
-    def array(self, ary, dtype=np.float16, name=None, allocator=drv.mem_alloc):
+    def array(self, ary, dtype=self.default_dtype, name=None, allocator=drv.mem_alloc):
         """
         converts a numpy array to a GPUTensor
         """
         return GPUTensor(self, ary.shape, dtype, allocator=allocator,
                           name=name, rounding=self.round_mode).set(ary)
 
-    def zeros(self, shape, dtype=np.float16, name=None, allocator=drv.mem_alloc):
+    def zeros(self, shape, dtype=self.default_dtype, name=None, allocator=drv.mem_alloc):
         """
         Returns an array of the given shape and dtype filled with 0's.
         """
         return GPUTensor(self, shape, dtype, allocator=allocator,
                           name=name, rounding=self.round_mode)._assign(0)
 
-    def ones(self, shape, dtype=np.float16, name=None, allocator=drv.mem_alloc):
+    def ones(self, shape, dtype=self.default_dtype, name=None, allocator=drv.mem_alloc):
         """
         Returns an array of the given shape and dtype filled with 1's.
         """
