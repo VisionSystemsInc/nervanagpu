@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os.path
+import re
+import traceback as tb
 import numpy as np
 from pycuda.compiler import SourceModule
 from pycuda.tools import context_dependent_memoize
@@ -424,16 +427,6 @@ _reduction_ops = {
     },
 }
 
-# import re
-# import traceback as tb
-# nrv_re = re.compile(r'gpu\.py$')
-# def _get_trace():
-#     caller = None
-#     for frame in tb.extract_stack():
-#         if nrv_re.search(frame[0]):
-#             break
-#         caller = (frame[0],frame[1])
-#     return caller
 
 def _get_module(template, template_vals):
 
@@ -442,11 +435,11 @@ def _get_module(template, template_vals):
 
     code = template % template_vals
 
-    # # f = open("kernel.cu", "w")
+    # print "Compiling %s %s" % template_vals["name"]
+    # f = open("kernel.cu", "w")
     # f = open("%s.cu" % template_vals["name"], "w")
     # print >>f, code
     # f.close()
-    # print "Compiling %s %s" % (template_vals["name"], _get_trace())
 
     return SourceModule(code, options=[ "--use_fast_math" ], keep=False) #,"-G"
 
@@ -599,7 +592,7 @@ def _get_compound_kernel(type_args):
     stack         = []
     red_regsiters = {}
     template      = _ew_template
-    template_vals = { "name" : "kernel_", "threads" : threads }
+    template_vals = { "threads" : threads }
     for key in placeholders:
         template_vals[key] = []
 
@@ -631,9 +624,6 @@ def _get_compound_kernel(type_args):
         if arg_type is ng.GPUTensor:
 
             dtype, take_axis = arg[2:4]
-
-            #TODO: need to be able to handle more than 26 params..
-            template_vals["name"] += dtype + chr(ord("A") + arg_id)
 
             if stage not in dup_reduction:
 
@@ -688,7 +678,6 @@ def _get_compound_kernel(type_args):
         elif arg_type is float:
 
             sig  += "f"
-            template_vals["name"] += "f4" + chr(ord("a") + arg_id)
             if stage not in dup_reduction:
                 stack.append("c%d" % arg_id)
                 ew_const = _ew_strings["const"]
@@ -696,8 +685,6 @@ def _get_compound_kernel(type_args):
 
         # Operations (arg_type = op_name)
         else:
-
-            template_vals["name"] += "_%s_" % arg_type
 
             if arg_type == "assign":
 
@@ -710,7 +697,6 @@ def _get_compound_kernel(type_args):
                 # rounding mode
                 if arg[2]:
                     mode = "random"
-                    post = "rr"
                     sig += "i"
                     template_vals["arguments"].append("const int mantissa_bits")
                     if not rand_init:
@@ -718,7 +704,6 @@ def _get_compound_kernel(type_args):
                     template_vals["inits"].append(_init_rand_round_func)
                 else:
                     mode = "nearest"
-                    post = "rn"
 
                 out_val   = stack.pop()
                 if out_val[0] == "i" and out_dtype == "i4":
@@ -729,7 +714,6 @@ def _get_compound_kernel(type_args):
                     if ew_common:
                         template_vals["common"].append(ew_common)
 
-                template_vals["name"] += post
                 if ew_round:
                     round_val = "r%d" % arg_id
                     template_vals[ops].append(ew_round.format(round_val, out_val))
@@ -816,6 +800,8 @@ def _get_compound_kernel(type_args):
     # add the dynamic placeholders: loads#, ops#, reduction#
     for key in placeholders:
         template_vals[key]      = "\n        ".join(template_vals[key])
+
+    template_vals["name"] = _get_kernel_name()
 
     module = _get_module(template, template_vals)
     kernel = module.get_function(template_vals["name"])
@@ -1173,3 +1159,27 @@ def _get_compensated_sum_kernel(dtype, rounding):
     kernel = module.get_function("compensated_sum")
     kernel.prepare("PPPPffiiii")
     return kernel
+
+
+nrv_re  = re.compile(r'nervanagpu\.py$')
+name_re = re.compile(r'\W')
+
+def _get_kernel_name():
+
+    for frame in tb.extract_stack():
+        if nrv_re.search(frame[0]):
+            break
+        caller = frame[0:2]
+
+    file_path, file_name = os.path.split(caller[0])
+    path1, path2         = os.path.split(file_path)
+    file_base, ext       = os.path.splitext(file_name)
+
+    names = ["kernel",]
+    for name in (path2, file_base, ext):
+        name = name_re.sub("", name)
+        if name: 
+            names.append(name)
+    names.append(str(caller[1]))
+
+    return "_".join(names)
