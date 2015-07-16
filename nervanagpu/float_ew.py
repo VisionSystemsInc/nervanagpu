@@ -435,7 +435,7 @@ def _get_module(template, template_vals):
 
     code = template % template_vals
 
-    # print "Compiling %s %s" % template_vals["name"]
+    # print "Compiling %s" % template_vals["name"]
     # f = open("kernel.cu", "w")
     # f = open("%s.cu" % template_vals["name"], "w")
     # print >>f, code
@@ -592,7 +592,7 @@ def _get_compound_kernel(type_args):
     stack         = []
     red_regsiters = {}
     template      = _ew_template
-    template_vals = { "threads" : threads }
+    template_vals = { "threads" : threads, "name" : _get_kernel_name() }
     for key in placeholders:
         template_vals[key] = []
 
@@ -669,7 +669,7 @@ def _get_compound_kernel(type_args):
                 # But only for arrays of diferent non-dup stages
                 elif (arg_id,stage) not in array_ids:
                     array_ids.add((arg_id,stage))
-                    ew_in = _ew_strings["in"]
+                    ew_in = _ew_strings["in%d" % take_axis]
                     loads = "loads%d" % stage
                     template_vals["inits"].append(ew_in["inits"].format(*fmt))
                     template_vals[loads  ].append(ew_in["loads"].format(*fmt))
@@ -724,6 +724,9 @@ def _get_compound_kernel(type_args):
 
             elif arg_type in _float_ops:
 
+                if len(template_vals["name"]) < 16:
+                    template_vals["name"].append(arg_type)
+
                 if stage not in dup_reduction:
 
                     ops = "ops%d" % stage
@@ -748,6 +751,9 @@ def _get_compound_kernel(type_args):
                     stack.append(op_list[0])
 
             elif arg_type in _reduction_ops:
+
+                if len(template_vals["name"]) < 16:
+                    template_vals["name"].append(arg_type)
 
                 # loop end condition for current stage
                 # add regardless of duplicate reduction stage
@@ -790,6 +796,7 @@ def _get_compound_kernel(type_args):
     template += _fin_template
 
     # convert lists to strings
+    template_vals["name"]       = "_".join(template_vals["name"])
     template_vals["common"]     = "\n".join(template_vals["common"])
     template_vals["arguments"]  = ",\n    ".join(template_vals["arguments"])
     template_vals["inits"]      = "\n    ".join(template_vals["inits"])
@@ -800,8 +807,6 @@ def _get_compound_kernel(type_args):
     # add the dynamic placeholders: loads#, ops#, reduction#
     for key in placeholders:
         template_vals[key]      = "\n        ".join(template_vals[key])
-
-    template_vals["name"] = _get_kernel_name()
 
     module = _get_module(template, template_vals)
     kernel = module.get_function(template_vals["name"])
@@ -1166,6 +1171,7 @@ name_re = re.compile(r'\W')
 
 def _get_kernel_name():
 
+    names = ["kernel",]
     for frame in tb.extract_stack():
         if nrv_re.search(frame[0]):
             break
@@ -1175,11 +1181,10 @@ def _get_kernel_name():
     path1, path2         = os.path.split(file_path)
     file_base, ext       = os.path.splitext(file_name)
 
-    names = ["kernel",]
     for name in (path2, file_base, ext):
         name = name_re.sub("", name)
         if name: 
             names.append(name)
     names.append(str(caller[1]))
 
-    return "_".join(names)
+    return names
