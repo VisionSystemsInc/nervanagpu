@@ -10,16 +10,16 @@ np.set_printoptions(threshold=8192*4, linewidth=600, formatter={'int':lambda x: 
 
 ng = NervanaGPU(stochastic_round=0, bench=1)
 
-dtype  = np.float16
-repeat = 100
-ones   = 0
-cpu    = 0
-size   = 64
+dtype  = np.float16 # np.float16 or np.float32
+repeat = 100        # repeat count for benchmarking
+ones   = 0          # simpler data for debugging
+cpu    = 0          # valdiate against numpy
+size   = None       # 32, 64, 128, None=auto
 
-X = 50
-N = 64
-C = 3072
-K = 3072
+X = 100   # Batch Size
+N = 128   # Minibatch Size
+C = 3072  # Input  Features
+K = 3072  # Output Features
 
 dimI = (X,C,N)
 dimO = (X,K,N)
