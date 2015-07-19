@@ -46,7 +46,7 @@
 
 <REGISTER_MAPPING>
 
-    0-63    ~ tid, blkA, blkB, blkZ, tidAX, tidBX, lda, ldb, ldaz, ldbz, tid1, tid7, txa, txa1, ta, xmad_ta, tb, xmad_tb, dimA, flag
+    64-95   ~ tid, blkA, blkB, blkZ, tidAX, tidBX, lda, ldb, ldaz, ldbz, tid1, tid7, txa, txa1, ta, xmad_ta, tb, xmad_tb, dimA, tbid, flag, tidAY, tidBY, k<1-3>, x<1-3>
 
     0-63    : czero<00-63>
 
@@ -59,10 +59,6 @@
     33,32,41,40,49,48,57,56 : cx<0-7>y6
     37,36,45,44,53,52,61,60 : cx<0-7>y7
 
-    64-79   ~ tid_2, tidAY, tidBY, k<1-3>, x<1-3>
-
-    80-81   : Rand<0-1>
-
     64-79   : j0Ay<0-7>, j0Bx<0-7>
     80-95   : j1Ay<0-7>, j1Bx<0-7>
 
@@ -70,15 +66,16 @@
 
     112-117 : track0A<0-1>, track1A<0-1>, trackB<0-1>
 
-    118-123 ~ writeAs, writeBs, k, txb, swapBuf
-    124-127 : readAs, readBs, tbid, seed
+    118-122 ~ writeAs, writeBs, k, txb, swapBuf
+    123-125 : readAs, readBs, seed
+    126-127 : Rand<0-1>
 
     64-83   ~ ldc, ldcz, ci, xmad_c, clk_shf1, clk_shf2, threadId, tid31, tid96, blockA, blockB, blockZ
     64-75   : c<0-7>, d3, d2, d1, d0
     76-85   : C04y<0-1>, C08y<0-1>, C12y<0-1>, C00y<0-1>
-    86-107  ~ lfsr<0-2>, ldc1, ldc4, ldc60, writeCs, readCs, cx<00|32>, cy<00|04|08|12>, alpha, beta
+    86-107  ~ lfsr<0-2>, ldc1, ldc4, ldc60, writeCs, readCs, cx<00|32>, cy<00|04|08|12>, alpha, beta, flags
 
-    108-125 ~ exp<0-3>, rand<0-3>, lfsr<0-2>_1, lfsr<0-2>_2, flags
+    108-122 ~ exp<0-3>, rand<0-3>, lfsr<0-2>_1, lfsr<0-2>_2
 
 
 </REGISTER_MAPPING>
@@ -97,6 +94,9 @@
 --:-:-:-:1      MOV ldbz, param_ldbz;
 
 --:-:-:-:1      STS.128 [addr_zero], RZ;
+<CODE>
+    return join '', map sprintf("--:-:-:-:1      LDS.U.128 czero%02d, [addr_zero];\n", $_ * 4), 0..15;
+</CODE>
 
 // Grab a seed for this thread
 // (blkB*gridDimA*256 + blkA*256 + tid) & (1024*256 - 1)
@@ -141,7 +141,7 @@
 --:-:-:-:1      XMAD.LO2 tb,  ldb,  tidBY, txb;
 08:-:-:-:1      XMAD.LO2 tb,  ldbz, blkZ, tb;
 --:-:-:-:1      LEA      trackB0.CC, tb, param_B[0],     1;
---:-:-:-:0      LEA.HI.X trackB1,    tb, param_B[1], RZ, 1;
+--:-:-:-:2      LEA.HI.X trackB1,    tb, param_B[1], RZ, 1;
 
 --:-:-:-:1      ISETP.LT.AND P6, PT, txb, param_n, PT;
 
@@ -166,10 +166,6 @@
 --:-:-:-:1      MOV32I swapBuf, -4x<64*8 + 128*8>;
 </SCHEDULE_BLOCK>
 
-<CODE>
-    return join '', map sprintf("--:-:1:-:1      LDS.U.128 czero%02d, [addr_zero];\n", $_ * 4), 0..15;
-</CODE>
-
 REMAINDER:
 
 <CODE>
@@ -192,12 +188,12 @@ REMAINDER:
 --:-:-:-:1 @!P4 LDS.U.64 loadAA0, [addr_zero];
     } : q{
 
---:-:2:-:2      S2R tid_2,  SR_TID.X;
+--:-:2:-:2      S2R tid,  SR_TID.X;
 
 <SCHEDULE_BLOCK>
-02:-:-:-:1      LOP.AND tidAY, tid_2, 1;
+02:-:-:-:1      LOP.AND tidAY, tid, 1;
 --:-:-:-:1      SHL     tidAY, tidAY, 2;
---:-:-:-:1      BFE.U32 tidBY, tid_2, 0x304; // 3 bits at position 4
+--:-:-:-:1      BFE.U32 tidBY, tid, 0x304; // 3 bits at position 4
 
 // doLoad0 = tidBY < k
 --:-:-:-:1      IADD x1, txb, 1;
@@ -325,7 +321,7 @@ REMAINDER:
 
 --:-:-:-:1      IADD readBs,  readBs, -swapBuf;
 --:-:-:-:0      IADD readAs,  readAs, -swapBuf;
-01:-:-:-:5      BAR.SYNC 0;
+--:-:-:-:5      BAR.SYNC 0;
 --:-:-:-:1      IADD writeBs, writeBs, swapBuf;
 --:-:-:-:1      IADD writeAs, writeAs, swapBuf;
 --:-:-:-:0      IADD swapBuf, RZ, -swapBuf;

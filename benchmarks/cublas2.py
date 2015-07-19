@@ -28,9 +28,9 @@ start, end = (drv.Event(), drv.Event())
 
 def cublas_dot(A, B, C, repeat=1):
 
-    lda = max(A.strides) // 4
-    ldb = max(B.strides) // 4
-    ldc = max(C.strides) // 4
+    lda = max(A.strides)
+    ldb = max(B.strides)
+    ldc = max(C.strides)
 
     opA = 't' if A.is_trans else 'n'
     opB = 't' if B.is_trans else 'n'

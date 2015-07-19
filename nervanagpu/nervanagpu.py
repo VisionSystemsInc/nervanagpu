@@ -25,6 +25,8 @@ from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 if sys.version_info >= (3, 0):
     from functools import reduce
 
+_none_slice = slice(None,None,None)
+
 class GPUTensor(object):
 
     def __init__(self, backend, shape,
@@ -215,8 +217,6 @@ class GPUTensor(object):
         asbuffer returns buffer interface to gpu data
         """
         return self.gpudata.as_buffer(self.nbytes)
-
-    _none_slice = slice(None,None,None)
 
     def take(self, indices, axis, out=None):
         if axis == 1:
@@ -910,8 +910,6 @@ class NervanaGPU(object):
             alpha, beta, flags,
             ldaz, ldbz, ldcz, batch_loops]
 
-        #import ipdb; ipdb.set_trace()
-
         # Warmup
         if repeat > 1:
             for r in range(max(repeat // 10, 1)):
@@ -1016,14 +1014,14 @@ class NervanaGPU(object):
                 op == "nn" and k % 16 == 0 and n % 8 == 0 or \
                 op == "nt" and k % 16 == 0:
                 op += "_vec"
-        else:
+        elif C.dtype.type is np.float32:
             clss = "sgemm"
-            if size == 64 and op == "nn":
-                ldb = ldb << 5
             if  op == "tn" and m % 4  == 0 and n % 4 == 0 or \
                 op == "nn" and k % 16 == 0 and n % 4 == 0 or \
                 op == "nt" and k % 16 == 0:
                 op += "_vec"
+        else:
+            raise TypeError("Only floating point dot currently supported.")
 
         gridB   = n // size + (n % size != 0)
         threads = 256 if size == 128 else 128
@@ -1039,6 +1037,8 @@ class NervanaGPU(object):
             A.gpudata, B.gpudata, C.gpudata,
             lda, ldb, ldc, m, n, k,
             alpha, beta, flags, 0, 0, 0, 0 ]
+
+        #import ipdb; ipdb.set_trace()
 
         # Warmup
         if repeat > 1:

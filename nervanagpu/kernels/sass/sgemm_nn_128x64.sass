@@ -46,7 +46,7 @@
 
 <REGISTER_MAPPING>
 
-    64-95   ~ tid, blkA, blkB, blkZ, txb, tidAY, tidBY, tidAX, tidBX, lda, ldb, ldaz, ldbz, tid1, tid2, tid7, txa, ta, xmad_ta, tb, tbb, tid15, xmad_tb, k<1-3>, x<1-3>
+    64-95   ~ tid, blkA, blkB, blkZ, txb, tidAY, tidBY, tidAX, tidBX, lda, ldb, ldaz, ldbz, tid1, tid2, tid7, txa, ta, xmad_ta, tb, tid15, xmad_tb, k<1-3>, x<1-3>
 
     0-63    : czero<00-63>
 
@@ -196,7 +196,7 @@ REMAINDER:
 
 --:-:-:-:1      IADD readBs,  readBs, -swapBuf;
 --:-:-:-:0      IADD readAs,  readAs, -swapBuf;
-01:-:-:-:5      BAR.SYNC 0;
+--:-:-:-:5      BAR.SYNC 0;
 --:-:-:-:1      IADD writeBs, writeBs, swapBuf;
 --:-:-:-:1      IADD writeAs, writeAs, swapBuf;
 --:-:-:-:0      IADD swapBuf, RZ, -swapBuf;

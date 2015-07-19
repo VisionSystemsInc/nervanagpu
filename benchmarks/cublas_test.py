@@ -27,9 +27,9 @@ handle = cublas.cublasCreate()
 
 def cublas_dot(A, B, C, alpha=1.0, beta=0.0, repeat=1):
 
-    lda = max(A.strides) // 4
-    ldb = max(B.strides) // 4
-    ldc = max(C.strides) // 4
+    lda = max(A.strides)
+    ldb = max(B.strides)
+    ldc = max(C.strides)
 
     opA = 't' if A.is_trans else 'n'
     opB = 't' if B.is_trans else 'n'
@@ -67,15 +67,26 @@ small_2  = (8,16,32,64,72,96,120,128,192)
 medium_2 = (32,64,128,192,256,786-32,786-16,786,786+16,786+32)
 big_2    = (32,64,128,1536-80,1536-64,1536,1536+64,1536+80,3072,4096)
 
-# sharedDim = (4096,4096)
-# devA1s = ng.empty(sharedDim, dtype=np.float32)
-# devB1s = ng.empty(sharedDim, dtype=np.float32)
-# devC1s = ng.empty(sharedDim, dtype=np.float32)
-# devA2s = ng.empty(sharedDim, dtype=np.float32)
-# devB2s = ng.empty(sharedDim, dtype=np.float32)
-# devC2s = ng.empty(sharedDim, dtype=np.float32)
+# small_1  = (31,33,63,65,127,129)
+# medium_1 = (778,785,786,787,794)
+# big_1    = (1535,1537,3073,4095)
 
-for dtype in (np.float16, np.float32, ):
+# small_2  = (32,64,72,96,120,128,192)
+# medium_2 = (786-32,786-16,786,786+16,786+32)
+# big_2    = (1536-80,1536+80,3072,4096)
+
+
+sharedDim = (4096,4096)
+devA1s = ng.empty(sharedDim, dtype=np.float32)
+devB1s = ng.empty(sharedDim, dtype=np.float32)
+devC1s = ng.empty(sharedDim, dtype=np.float32)
+devA2s = ng.empty(sharedDim, dtype=np.float32)
+devB2s = ng.empty(sharedDim, dtype=np.float32)
+devC2s = ng.empty(sharedDim, dtype=np.float32)
+devPs  = ng.empty((sharedDim[0],1), dtype=np.float32)
+
+
+for dtype in (np.float16, np.float32, ): # np.float16
     
     maxerr = .005 if dtype is np.float32 else 0.7
 
@@ -101,12 +112,12 @@ for dtype in (np.float16, np.float32, ):
 
                             try: 
 
-                                devA1 = ng.empty(dimA, dtype=dtype)
-                                devB1 = ng.empty(dimB, dtype=dtype)
-                                devC1 = ng.empty(dimC, dtype=dtype)
-                                # devA1 = devA1s.share(dimA, dtype=dtype)
-                                # devB1 = devB1s.share(dimB, dtype=dtype)
-                                # devC1 = devC1s.share(dimC, dtype=dtype)
+                                # devA1 = ng.empty(dimA, dtype=dtype)
+                                # devB1 = ng.empty(dimB, dtype=dtype)
+                                # devC1 = ng.empty(dimC, dtype=dtype)
+                                devA1 = devA1s.share(dimA, dtype=dtype)
+                                devB1 = devB1s.share(dimB, dtype=dtype)
+                                devC1 = devC1s.share(dimC, dtype=dtype)
 
                                 # fill with uniform randoms from -1 to 1
                                 devA1[:] = 2 * (.5 - ng.rand())
@@ -119,15 +130,15 @@ for dtype in (np.float16, np.float32, ):
                                     devB2 = devB1
                                 # otherwise copy
                                 else:
-                                    devA2 = ng.empty(dimA, dtype=np.float32)
-                                    devB2 = ng.empty(dimB, dtype=np.float32)
-                                    # devA2 = devA2s.share(dimA, dtype=np.float32)
-                                    # devB2 = devB2s.share(dimB, dtype=np.float32)
+                                    # devA2 = ng.empty(dimA, dtype=np.float32)
+                                    # devB2 = ng.empty(dimB, dtype=np.float32)
+                                    devA2 = devA2s.share(dimA, dtype=np.float32)
+                                    devB2 = devB2s.share(dimB, dtype=np.float32)
                                     devA2[:] = devA1
                                     devB2[:] = devB1
 
-                                devC2    = ng.empty(dimC, dtype=np.float32)
-                                # devC2    = devC2s.share(dimC, dtype=np.float32)
+                                # devC2    = ng.empty(dimC, dtype=np.float32)
+                                devC2    = devC2s.share(dimC, dtype=np.float32)
                                 devC2[:] = devC1
 
                                 if op[0] == 't': devA1, devA2 = devA1.T, devA2.T
@@ -139,16 +150,17 @@ for dtype in (np.float16, np.float32, ):
                                     try: 
 
                                         ng.dot(devA1, devB1, devC1, alpha=alpha, beta=beta, size=tile)
-                                        context.synchronize()
+                                        #context.synchronize()
 
                                         cublas_dot(devA2, devB2, devC2, alpha=alpha, beta=beta)
 
-                                        partial1 = ng.empty((devC1.shape[0],1), dtype=np.float32)
+                                        #partial1 = ng.empty((devC1.shape[0],1), dtype=np.float32)
+                                        partial1 = devPs.share((devC1.shape[0],1), dtype=np.float32)
                                         partial2 = partial1[0:1,0:1]
 
                                         if ng.min(ng.finite(devC1), partial=partial1, out=partial2).get()[0,0] == 0.0:
-                                            print("Error: NaN KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" %
-                                                  (K,C,N, alpha,beta, itemsize))
+                                            print("Error: NaN op: %s tile: %d KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" %
+                                                  (op, tile, K,C,N, alpha,beta, itemsize))
                                             exit()
 
                                         diff = ng.max(abs(devC2 - devC1), partial=partial1, out=partial2).get()[0,0]
@@ -158,6 +170,8 @@ for dtype in (np.float16, np.float32, ):
                                         if pctErr > maxerr:
                                             print("Error: %.3f%% diff: %.5f mean %.5f op: %s tile: %d KCN: (%d,%d,%d) ab: (%f,%f) dtype: %d" %
                                                   (pctErr, diff, mean, op, tile, K,C,N, alpha,beta, itemsize))
+                                            print devC1.get()
+                                            print devC2.get()
                                             exit()
                                     
                                     except drv.Error as e:
