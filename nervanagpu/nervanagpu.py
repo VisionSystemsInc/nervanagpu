@@ -25,8 +25,6 @@ from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 if sys.version_info >= (3, 0):
     from functools import reduce
 
-_none_slice = slice(None,None,None)
-
 class GPUTensor(object):
 
     def __init__(self, backend, shape,
@@ -41,7 +39,7 @@ class GPUTensor(object):
                 rounding   = 0):
 
         # supported dtypes
-        assert dtype in (np.float16, np.float32, np.uint8, np.int8, np.int32)
+        assert dtype in (np.float16, np.float32, np.uint8, np.int8, np.uint16, np.int16, np.uint32, np.int32)
 
         dtype = np.dtype(dtype)
 
@@ -59,7 +57,7 @@ class GPUTensor(object):
 
         # only support C ordering for now.
         if strides is None:
-            self.strides = _contiguous_strides(dtype.itemsize, shape)
+            self.strides = _contiguous_strides(shape)
         else:
             self.strides = tuple(strides)
 
@@ -96,7 +94,7 @@ class GPUTensor(object):
                     ew_size -= 1
 
             self.shape_ew   = (size // ew_size, ew_size)
-            self.strides_ew = _contiguous_strides(dtype.itemsize, self.shape_ew)
+            self.strides_ew = _contiguous_strides(self.shape_ew)
 
         if gpudata is None:
             if size:
@@ -165,7 +163,7 @@ class GPUTensor(object):
     @property
     @memoize_method
     def is_contiguous(self):
-        return not self.take_array and self.strides == _contiguous_strides(self.dtype.itemsize, self.shape) 
+        return not self.take_array and self.strides == _contiguous_strides(self.shape) 
 
     def set(self, ary, device=None):
         """
@@ -181,7 +179,7 @@ class GPUTensor(object):
         assert self.is_contiguous, "Array in set() must be contiguous"
         if ary.dtype is not self.dtype:
             ary = ary.astype(self.dtype)
-        assert ary.strides == self.strides
+        assert ary.strides == tuple(self.dtype.itemsize*s for s in self.strides)
 
         if device is None:
             drv.memcpy_htod_async(self.gpudata, ary, stream)
@@ -217,6 +215,8 @@ class GPUTensor(object):
         asbuffer returns buffer interface to gpu data
         """
         return self.gpudata.as_buffer(self.nbytes)
+
+    _none_slice = slice(None,None,None)
 
     def take(self, indices, axis, out=None):
         if axis == 1:
@@ -262,7 +262,7 @@ class GPUTensor(object):
                 # def ceil_div(x, y): return -(-x // y)
                 new_shape.append( -((start-stop) // idx_stride) )
                 new_strides.append(idx_stride*array_stride)
-                new_offset += array_stride*start
+                new_offset += array_stride*start*self.dtype.itemsize
 
                 index_axis += 1
                 array_axis += 1
@@ -284,6 +284,7 @@ class GPUTensor(object):
                     raise IndexError("Fancy indexing only currently supported for one axis at a time.")
 
                 if index_entry.dtype.type is not np.int32:
+                    #TODO: this should now work for all int types, but need to test
                     raise IndexError("Fancy indexing only currently supported with int32 types.")
 
                 take_array = (index_entry, array_axis)
@@ -302,7 +303,7 @@ class GPUTensor(object):
                 if not (0 <= index_entry < array_shape):
                     raise IndexError("subindex in axis %d out of range" % index_axis)
 
-                new_offset += self.strides[array_axis]*index_entry
+                new_offset += self.strides[array_axis]*index_entry*self.dtype.itemsize
 
                 index_axis += 1
                 array_axis += 1
@@ -355,17 +356,11 @@ class GPUTensor(object):
                 value = self.dtype.type(value)
 
                 if self.dtype.itemsize == 1:
-                    drv.memset_d8_async( self.gpudata,
-                                   unpack_from('B', value)[0],
-                                   self.size, stream)
+                    drv.memset_d8_async( self.gpudata, unpack_from('B', value)[0], self.size, stream)
                 elif self.dtype.itemsize == 2:
-                    drv.memset_d16_async(self.gpudata,
-                                   unpack_from('H', value)[0],
-                                   self.size, stream)
+                    drv.memset_d16_async(self.gpudata, unpack_from('H', value)[0], self.size, stream)
                 else:
-                    drv.memset_d32_async(self.gpudata,
-                                   unpack_from('I', value)[0],
-                                   self.size, stream)
+                    drv.memset_d32_async(self.gpudata, unpack_from('I', value)[0], self.size, stream)
 
             # otherwise use our copy kerel
             else:
@@ -431,14 +426,14 @@ class GPUTensor(object):
                 allocator  = self.allocator,
                 base       = self,
                 gpudata    = self.gpudata,
-                strides    = _contiguous_strides(self.dtype.itemsize, shape),
+                strides    = _contiguous_strides(shape),
                 name       = self.name,
                 rounding   = self.rounding)
 
     def share(self, shape, dtype=None, name=None):
         """
         return a view: ary, where ary.size <= self.size
-        Allows easy sharing of tempoary memory
+        Allows easy sharing of temporary memory
         """
         size = reduce(lambda x, y: x * y, shape, 1)
         if size > self.size:
@@ -460,7 +455,7 @@ class GPUTensor(object):
                 allocator  = self.allocator,
                 base       = self,
                 gpudata    = self.gpudata,
-                strides    = _contiguous_strides(dtype.itemsize, shape),
+                strides    = _contiguous_strides(shape),
                 name       = name,
                 rounding   = self.rounding)
 
@@ -469,14 +464,25 @@ class GPUTensor(object):
         """
         return a transposed view
         """
+        if len(self.shape) <= 2:
+            shape   = self.shape[::-1]
+            strides = self.strides[::-1]
+        else:
+            # support for batched dot. 
+            # perserve outer dimension but reverse inner dims
+            shape   = list(self.shape[::-1])
+            strides = list(self.strides[::-1])
+            shape   = tuple(shape[-1:]   + shape[:-1])
+            strides = tuple(strides[-1:] + strides[:-1])
+
         return self.__class__(
                 backend    = self.backend,
-                shape      = self.shape[::-1],
+                shape      = shape,
                 dtype      = self.dtype,
                 allocator  = self.allocator,
                 base       = self,
                 gpudata    = self.gpudata,
-                strides    = self.strides[::-1],
+                strides    = strides,
                 is_trans   = not self.is_trans,
                 name       = self.name,
                 rounding   = self.rounding)
@@ -795,6 +801,135 @@ class NervanaGPU(object):
             msecs  = end.time_since(start) / repeat
             print("%7.3f msecs (%s) grid:%s" % (msecs, layer, layer.grid))
 
+    def batched_dot(self, A, B, C, alpha=1.0, beta=0.0, relu=False, repeat=1, size=None):
+
+        assert A.dtype.type == B.dtype.type == C.dtype.type
+
+        flags = 0
+        if C.rounding: flags |= 1 | (C.rounding << 16)
+        if relu:       flags |= 2
+
+        dima, dimb, dimc = 0,0,0
+        ldaz, ldbz, ldcz = 0,0,0
+        batch_grid, batch_loops = 1,1
+
+        if len(A.shape) == 3:
+            dima = 1
+            ldaz = A.strides[0]
+
+        if len(B.shape) == 3:
+            dimb = 1
+            ldbz = B.strides[0]
+
+        assert dima or dimb, "Tensor A or B must have 3 dims to use batched_dot"
+
+        if len(C.shape) == 3:
+            dimc = 1
+            ldcz = C.strides[0]
+            batch_grid  = C.shape[0]
+            assert not dima or A.shape[0] == batch_grid
+            assert not dimb or B.shape[0] == batch_grid
+
+        elif dima:
+            batch_loops = A.shape[0]
+            assert not dimb or B.shape[0] == batch_loops
+
+        elif dimb:
+            batch_loops = B.shape[0]
+            assert not dima or A.shape[0] == batch_loops
+
+        m = A.shape[0 + dima]
+        n = B.shape[1 + dimb]
+        k = A.shape[1 + dima]
+
+        assert m == C.shape[0 + dimc]
+        assert n == C.shape[1 + dimc]
+        assert k == B.shape[0 + dimb]
+
+        lda = max(A.strides[dima:])
+        ldb = max(B.strides[dimb:])
+        ldc = max(C.strides[dimc:])
+
+        if A.is_trans:
+            opA = 't'
+            lda *= 8 * A.dtype.itemsize # saves a kernel register
+        else:
+            opA = 'n'
+
+        if B.is_trans:
+            opB = 't'
+        else:
+            opB = 'n'
+            ldb *= 8 * B.dtype.itemsize # saves a kernel register
+
+        op = opA + opB
+        assert op != "tt"
+
+        if batch_loops > 1:
+            size = 128
+        elif size is None:
+            if n % 128 == 0:
+                size = 128
+            elif n > 32:
+                size = 64
+            else:
+                size = 32
+
+        # nt and nn are more efficient with k%16==0
+        if C.dtype.type is np.float16:
+            clss = "hgemm"
+            if  op == "tn" and m % 8  == 0 and n % 8 == 0 or \
+                op == "nn" and k % 16 == 0 and n % 8 == 0 or \
+                op == "nt" and k % 16 == 0:
+                op += "_vec"
+        elif C.dtype.type is np.float32:
+            clss = "sgemm"
+            if  op == "tn" and m % 4  == 0 and n % 4 == 0 or \
+                op == "nn" and k % 16 == 0 and n % 4 == 0 or \
+                op == "nt" and k % 16 == 0:
+                op += "_vec"
+        else:
+            raise TypeError("Only floating point dot currently supported.")
+
+        gridA   = m // 128  + (m % 128 != 0)
+        gridB   = n // size + (n % size != 0)
+        threads = 256 if size == 128 else 128
+        size    = "128x%d" % size
+
+        kernel = _get_gemm_kernel(self.cubin_path, clss, op, size)
+        params = [
+            (batch_grid,gridA,gridB), (threads,1,1), self.stream, _get_rand_state(),
+            A.gpudata, B.gpudata, C.gpudata,
+            lda, ldb, ldc, m, n, k,
+            alpha, beta, flags,
+            ldaz, ldbz, ldcz, batch_loops]
+
+        #import ipdb; ipdb.set_trace()
+
+        # Warmup
+        if repeat > 1:
+            for r in range(max(repeat // 10, 1)):
+                kernel.prepared_async_call(*params)
+
+        if self.bench or repeat > 1:
+            start, end = _get_events()
+            start.record(self.stream)
+
+        for r in range(repeat):
+            kernel.prepared_async_call(*params)
+
+        if self.bench or repeat > 1:
+            end.record(self.stream)
+            end.synchronize()
+            msecs = end.time_since(start) / repeat
+            gflops = (batch_loops * batch_grid * m * n * k * 2.0) / (msecs * 1000000.0)
+            print("%7.3f msecs %4.0f gflops (%s_%s: %d,%d,%d) size:%s grid:(%d,%d,%d) loops:%d" %
+                  (msecs,gflops,clss,op,m,n,k, size,batch_grid,gridA,gridB,batch_loops))
+            if repeat > 1:
+                return gflops
+
+        return C
+
     def dot(self, A, B, C, alpha=1.0, beta=0.0, relu=False, repeat=1, size=None):
         """
         C = alpha * A * B   + beta * C
@@ -805,20 +940,29 @@ class NervanaGPU(object):
 
         size: one of 32, 64, 128.  Sometimes the fastest tiling isn't chosen for you.
         """
-        assert A.dtype == B.dtype == C.dtype
-        itemsize = C.dtype.itemsize
+        assert A.dtype.type == B.dtype.type == C.dtype.type
 
         # one dimention must be contiguous
-        assert min(A.strides) == itemsize
-        assert min(B.strides) == itemsize
-        assert min(C.strides) == itemsize
+        assert min(A.strides) == 1
+        assert min(B.strides) == 1
+        assert min(C.strides) == 1
 
-        lda = max(A.strides) // itemsize
-        ldb = max(B.strides) // itemsize
-        ldc = max(C.strides) // itemsize
+        lda = max(A.strides)
+        ldb = max(B.strides)
+        ldc = max(C.strides)
 
-        opA = 't' if A.is_trans else 'n'
-        opB = 't' if B.is_trans else 'n'
+        if A.is_trans:
+            opA = 't'
+            lda *= 8 * A.dtype.itemsize # saves a kernel register
+        else:
+            opA = 'n'
+
+        if B.is_trans:
+            opB = 't'
+        else:
+            opB = 'n'
+            ldb *= 8 * B.dtype.itemsize # saves a kernel register
+        
         op  = opA + opB
         assert op != "tt"
 
@@ -859,10 +1003,6 @@ class NervanaGPU(object):
             else:
                 size = 128
 
-        gridB   = n // size + (n % size != 0)
-        threads = 256 if size == 128 else 128
-        size    = "128x%d" % size
-
         # nt and nn are more efficient with k%16==0
         if C.dtype.type is np.float16:
             clss = "hgemm"
@@ -872,10 +1012,16 @@ class NervanaGPU(object):
                 op += "_vec"
         else:
             clss = "sgemm"
+            if size == 64 and op == "nn":
+                ldb = ldb << 5
             if  op == "tn" and m % 4  == 0 and n % 4 == 0 or \
-                op == "nn" and k % 8  == 0 and n % 4 == 0 or \
+                op == "nn" and k % 16 == 0 and n % 4 == 0 or \
                 op == "nt" and k % 16 == 0:
                 op += "_vec"
+
+        gridB   = n // size + (n % size != 0)
+        threads = 256 if size == 128 else 128
+        size    = "128x%d" % size
 
         flags = 0
         if C.rounding: flags |= 1 | (C.rounding << 16)
@@ -883,10 +1029,10 @@ class NervanaGPU(object):
 
         kernel = _get_gemm_kernel(self.cubin_path, clss, op, size)
         params = [
-            (gridA,gridB,1), (threads,1,1), self.stream, _get_rand_state(),
+            (1,gridA,gridB), (threads,1,1), self.stream, _get_rand_state(),
             A.gpudata, B.gpudata, C.gpudata,
             lda, ldb, ldc, m, n, k,
-            alpha, beta, flags ]
+            alpha, beta, flags, 0, 0, 0, 0 ]
 
         # Warmup
         if repeat > 1:
@@ -925,14 +1071,13 @@ class NervanaGPU(object):
 
         shape    = sum_tensor.shape_ew
         strides  = sum_tensor.strides_ew
-        itemsize = sum_tensor.dtype.itemsize
         kernel   = _get_compensated_sum_kernel(sum_tensor.dtype.str[1:], sum_tensor.rounding > 0)
 
         kernel.prepared_async_call(
             (shape[0],1,1), (32,1,1), self.stream, _get_rand_state(),
             sum_tensor.gpudata, cmp_tensor.gpudata, add_tensor.gpudata,
             cmp_scale, add_scale, 
-            strides[0]//itemsize, strides[1]//itemsize, 
+            strides[0], strides[1], 
             shape[1], sum_tensor.rounding)
 
     def add         (self, a, b, out=None): return OpTreeNode.build("add", a, b, out=out)
@@ -1126,10 +1271,10 @@ class OpTreeNode(tuple):
 
     #def __nonzero__  (self): raise ValueError("The truth value of an array with more than one element is ambiguous.")
 
-
-def _contiguous_strides(itemsize, shape):
+# Note the strides computed here do not include the dtype.itemsize
+def _contiguous_strides(shape):
     if shape:
-        strides = [itemsize]
+        strides = [1]
         for s in shape[:0:-1]:
             strides.append(strides[-1]*s)
         return tuple(strides[::-1])
@@ -1163,7 +1308,7 @@ def _get_gemm_kernel(path, clss, op, size):
     module = _get_module(path, clss, op, size)
     kernel = "{0}_{1}_{2}".format(clss, op, size)
     func   = module.get_function(kernel)
-    func.prepare("PPPPIIIIIIffI")
+    func.prepare("PPPPIIIIIIffIIIII")
     #print("Loaded: ", kernel)
     return func
 

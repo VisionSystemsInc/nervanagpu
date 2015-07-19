@@ -215,6 +215,38 @@ __device__ __forceinline__ unsigned short fp32_to_fp16(float val)
     return ret;
 }
 """,
+        "i4" : r"""
+__device__ __forceinline__ int fp32_to_int32(float val)
+{
+    int ret;
+    asm("cvt.rni.s32.f32 %0, %1;" : "=r"(ret) : "f"(val));
+    return ret;
+}
+""",
+        "u4" : r"""
+__device__ __forceinline__ unsigned fp32_to_uint32(float val)
+{
+    unsigned ret;
+    asm("cvt.rni.u32.f32 %0, %1;" : "=r"(ret) : "f"(val));
+    return ret;
+}
+""",
+        "i2" : r"""
+__device__ __forceinline__ short fp32_to_int16(float val)
+{
+    short ret;
+    asm("cvt.rni.s16.f32 %0, %1;" : "=h"(ret) : "f"(val));
+    return ret;
+}
+""",
+        "u2" : r"""
+__device__ __forceinline__ unsigned short fp32_to_uint16(float val)
+{
+    unsigned short;
+    asm("cvt.rni.u16.f32 %0, %1;" : "=h"(ret) : "f"(val));
+    return ret;
+}
+""",
         "i1" : r"""
 __device__ __forceinline__ char fp32_to_int8(float val)
 {
@@ -231,19 +263,11 @@ __device__ __forceinline__ unsigned char fp32_to_uint8(float val)
     return ret;
 }
 """,
-        "i4" : r"""
-__device__ __forceinline__ int fp32_to_int32(float val)
-{
-    int ret;
-    asm("cvt.rni.s32.f32 %0, %1;" : "=r"(ret) : "f"(val));
-    return ret;
-}
-""",
     },
 }
 # random rounding not used for these types
-_common_round["random"]["i1"] = _common_round["nearest"]["i1"]
-_common_round["random"]["u1"] = _common_round["nearest"]["u1"]
+for dtype in ("i4","u4","i2","u2","i1","u1"):
+    _common_round["random"][dtype] = _common_round["nearest"][dtype]
 
 
 _common_fp16_to_fp32 = r"""
@@ -268,16 +292,28 @@ _ew_types = {
         "type" : "unsigned short",
         "cvt"  : "fp16_to_fp32",
     },
+    "i4" : {
+        "type" : "int",
+        "cvt"  : "(float)",
+    },
+    "u4" : {
+        "type" : "unsigned int",
+        "cvt"  : "(float)",
+    },
+    "i2" : {
+        "type" : "short",
+        "cvt"  : "(float)",
+    },
+    "u2" : {
+        "type" : "unsigned short",
+        "cvt"  : "(float)",
+    },
     "i1" : {
         "type" : "char",
         "cvt"  : "(float)",
     },
     "u1" : {
         "type" : "unsigned char",
-        "cvt"  : "(float)",
-    },
-    "i4" : {
-        "type" : "int",
         "cvt"  : "(float)",
     },
 }
@@ -334,15 +370,21 @@ _ew_strings = {
         "random"  : {
             "f4"  : "float {0}          = fp32_to_fp32_rand({1}, lfsr0, lfsr1, lfsr2, rand_scale, rand_mask);",
             "f2"  : "unsigned short {0} = fp32_to_fp16_rand({1}, lfsr0, lfsr1, lfsr2, rand_scale, rand_mask);",
+            "i4"  : "int {0}            = fp32_to_int32({1});",
+            "u4"  : "unsigned int {0}   = fp32_to_uint32({1});",
+            "i2"  : "short {0}          = fp32_to_int16({1});",
+            "u2"  : "unsigned short {0} = fp32_to_uint16({1});",
             "i1"  : "char {0}           = fp32_to_int8({1});",
             "u1"  : "unsigned char {0}  = fp32_to_uint8({1});",
-            "i4"  : "int {0}            = fp32_to_int32({1});",
         },
         "nearest" : {
             "f2"  : "unsigned short {0} = fp32_to_fp16({1});",
+            "i4"  : "int {0}            = fp32_to_int32({1});",
+            "u4"  : "unsignedint {0}    = fp32_to_uint32({1});",
+            "i2"  : "short {0}          = fp32_to_int16({1});",
+            "u2"  : "unsigned short {0} = fp32_to_uint16({1});",
             "i1"  : "char {0}           = fp32_to_int8({1});",
             "u1"  : "unsigned char {0}  = fp32_to_uint8({1});",
-            "i4"  : "int {0}            = fp32_to_int32({1});",
         },
     },
 }
@@ -706,7 +748,8 @@ def _get_compound_kernel(type_args):
                     mode = "nearest"
 
                 out_val   = stack.pop()
-                if out_val[0] == "i" and out_dtype == "i4":
+                # if the last stack value came from an argmax/min just do implicit type conversion
+                if out_val[0] == "i" and out_dtype[0] in "iu":
                     ew_round = None
                 else:
                     ew_round  = _ew_strings["round"][mode].get(out_dtype, None)
@@ -882,10 +925,10 @@ def call_compound_kernel(rand_state, *args):
             # use the more efficient dimensions if this is a plain ew op.
             if len(arg.shape) == 2 and (broadcast or reduction or transpose or takeop):
                 shape   = arg.shape
-                strides = arg.strides
+                strides = list(arg.strides[::stride_order])
             else:
                 shape   = arg.shape_ew
-                strides = arg.strides_ew
+                strides = list(arg.strides_ew[::stride_order])
 
             # If same array is passed in multiple times to expression,
             # consolidate them into one kernel argument.
@@ -903,10 +946,6 @@ def call_compound_kernel(rand_state, *args):
                 else:
                     indx = array_ids[arg] = arg_cnt
                 arg_cnt += 1
-
-                # support transposed striding or reduction along an axis
-                # let C pointer arithmetic handle itemsize for us
-                strides = [s // arg.dtype.itemsize for s in strides[::stride_order]]
 
                 # special case of reducing and outputing along axis=0
                 if arg is out and axis == 0 and shape[0] == 1:

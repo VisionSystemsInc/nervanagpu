@@ -70,7 +70,7 @@ define list_includes
   $(shell sed -rn 's/^<INCLUDE file="(.*)"\/>/\1/p' $(call strip_codes,$(1)))
 endef
 
-WIDTHS := h s hs # h == half (16bit), s == single (32bit)
+WIDTHS := h s # h == half (16bit), s == single (32bit)
 
 GEMM_ORDERS := _nn _nt _tn
 GEMM_CODES := _ _vec_

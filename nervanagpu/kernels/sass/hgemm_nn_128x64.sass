@@ -30,7 +30,7 @@
     param_C[0]      : c[0x0][0x158]
     param_C[1]      : c[0x0][0x15c]
     param_lda       : c[0x0][0x160]
-    param_ldb       : c[0x0][0x164]
+    param_ldb8      : c[0x0][0x164]
     param_ldc       : c[0x0][0x168]
     param_m         : c[0x0][0x16c]
     param_n         : c[0x0][0x170]
@@ -38,11 +38,15 @@
     param_alpha     : c[0x0][0x178]
     param_beta      : c[0x0][0x17c]
     param_flags     : c[0x0][0x180]
+    param_ldaz      : c[0x0][0x184]
+    param_ldbz      : c[0x0][0x188]
+    param_ldcz      : c[0x0][0x18c]
+    param_loops     : c[0x0][0x190]
 </CONSTANT_MAPPING>
 
 <REGISTER_MAPPING>
 
-    0-63    ~ tid, blkA, blkB, tidAX, tidBX, lda, ldb, tid1, tid7, txa, txa1, ta, xmad_ta, tb, xmad_tb, dimA, flag
+    0-63    ~ tid, blkA, blkB, blkZ, tidAX, tidBX, lda, ldb, ldaz, ldbz, tid1, tid7, txa, txa1, ta, xmad_ta, tb, xmad_tb, dimA, flag
 
     0-63    : czero<00-63>
 
@@ -66,10 +70,10 @@
 
     112-117 : track0A<0-1>, track1A<0-1>, trackB<0-1>
 
-    118-123 ~ writeAs, writeBs, k, ldb8, txb, swapBuf
+    118-123 ~ writeAs, writeBs, k, txb, swapBuf
     124-127 : readAs, readBs, tbid, seed
 
-    64-83   ~ ldc, ci, xmad_c, clk_shf1, clk_shf2, threadId, tid31, tid96, blockA, blockB
+    64-83   ~ ldc, ldcz, ci, xmad_c, clk_shf1, clk_shf2, threadId, tid31, tid96, blockA, blockB, blockZ
     64-75   : c<0-7>, d3, d2, d1, d0
     76-85   : C04y<0-1>, C08y<0-1>, C12y<0-1>, C00y<0-1>
     86-107  ~ lfsr<0-2>, ldc1, ldc4, ldc60, writeCs, readCs, cx<00|32>, cy<00|04|08|12>, alpha, beta
@@ -80,14 +84,17 @@
 </REGISTER_MAPPING>
 
 --:-:1:-:1      S2R tid,  SR_TID.X;
---:-:2:-:1      S2R blkA, SR_CTAID.X;
---:-:3:-:1      S2R blkB, SR_CTAID.Y;
+--:-:2:-:1      S2R blkA, SR_CTAID.Y;
+--:-:3:-:1      S2R blkB, SR_CTAID.Z;
+--:-:4:-:1      S2R blkZ, SR_CTAID.X;
 
 <SCHEDULE_BLOCK>
 --:-:-:-:1      MOV k,   param_k;
 --:-:-:-:1      MOV lda, param_lda;
---:-:-:-:1      MOV ldb, param_ldb;
---:-:-:-:1      SHL ldb8, ldb, 4;
+--:-:-:-:1      MOV ldb, param_ldb8;
+--:-:-:-:1      SHR.U32 ldb, ldb, 4;
+--:-:-:-:1      MOV ldaz, param_ldaz;
+--:-:-:-:1      MOV ldbz, param_ldbz;
 
 --:-:-:-:1      STS.128 [addr_zero], RZ;
 
@@ -113,6 +120,7 @@
 // trackA += 2 * ((blkA*128 + tidAX) * lda + tidAY)
 02:-:-:-:1      ISCADD  txa, blkA, tidAX, 7;
 --:-:-:-:1      XMAD.LO ta, lda, txa, tidAY, xmad_ta;
+08:-:-:-:1      XMAD.LO2 ta,  ldaz, blkZ, ta;
 --:-:-:-:1      LEA      track0A0.CC, ta,  param_A[0],     1;
 --:-:-:-:1      LEA.HI.X track0A1,    ta,  param_A[1], RZ, 1;
 --:-:-:-:1      LEA      track1A0.CC, lda, track0A0,       1;
@@ -131,6 +139,7 @@
 // trackB += (blkB*64 + ldb*tidBY + tidBX) * 2
 04:-:-:-:1      ISCADD   txb, blkB, tidBX, 6;
 --:-:-:-:1      XMAD.LO2 tb,  ldb,  tidBY, txb;
+08:-:-:-:1      XMAD.LO2 tb,  ldbz, blkZ, tb;
 --:-:-:-:1      LEA      trackB0.CC, tb, param_B[0],     1;
 --:-:-:-:0      LEA.HI.X trackB1,    tb, param_B[1], RZ, 1;
 
@@ -252,7 +261,7 @@ REMAINDER:
     our $vec;
     return $vec ? q{
 28:-:-:-:4      F2F.F32.F16 loadB3, loadB1.H1;
---:-:-:-:0      IADD   trackB0.CC, trackB0, ldb8;
+--:-:-:-:0      IADD   trackB0.CC, trackB0, param_ldb8;
 --:-:-:-:4      F2F.F32.F16 loadB2, loadB1.H0;
 --:-:-:-:4      F2F.F32.F16 loadB1, loadB0.H1;
 --:-:4:-:2      F2F.F32.F16 loadB0, loadB0.H0;
@@ -283,7 +292,7 @@ REMAINDER:
     } : q{
 
 20:-:-:-:4      F2F.F32.F16 loadB0, loadB0;
---:-:-:-:0      IADD   trackB0.CC, trackB0, ldb8;
+--:-:-:-:0      IADD   trackB0.CC, trackB0, param_ldb8;
 --:-:-:-:4      F2F.F32.F16 loadB1, loadB1;
 --:-:-:-:4      F2F.F32.F16 loadB2, loadB2;
 --:-:6:-:2      F2F.F32.F16 loadB3, loadB3;
@@ -430,7 +439,7 @@ REMAINDER:
             )
         ),
 
-        j5c46 => "--:-:-:-:1  \@P0 IADD   trackB0.CC, trackB0, ldb8;\n",
+        j5c46 => "--:-:-:-:1  \@P0 IADD   trackB0.CC, trackB0, param_ldb8;\n",
         j5c54 => "--:-:-:-:1  \@P0 IADD.X trackB1,    trackB1, RZ;\n",
 
         j6c63 => "--:-:-:-:0      IADD32I k, k, -8;\n" .

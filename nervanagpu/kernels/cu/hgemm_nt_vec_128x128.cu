@@ -29,7 +29,11 @@ __global__ void __launch_bounds__(256) hgemm_nt_vec_128x128
     int          param_k,
     float        param_alpha,
     float        param_beta,
-    int          param_flags
+    int          param_flags,
+    int          param_ldaz,
+    int          param_ldbz,
+    int          param_ldcz,
+    int          param_batch_loops
 )
 {
     __shared__ float share[128 * 8 * 4 + 4];

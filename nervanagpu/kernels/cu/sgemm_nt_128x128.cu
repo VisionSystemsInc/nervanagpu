@@ -17,7 +17,7 @@
 extern "C"
 __global__ void __launch_bounds__(256) sgemm_nt_128x128
 (
-    unsigned int* param_Rand,
+    unsigned*    param_Rand,
     const float* param_A,
     const float* param_B,
     float*       param_C,
@@ -29,7 +29,11 @@ __global__ void __launch_bounds__(256) sgemm_nt_128x128
     int          param_k,
     float        param_alpha,
     float        param_beta,
-    int          param_flags
+    int          param_flags,
+    int          param_ldaz,
+    int          param_ldbz,
+    int          param_ldcz,
+    int          param_batch_loops
 )
 {
     __shared__ float share[128 * 8 * 4 + 4];

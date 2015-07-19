@@ -97,8 +97,11 @@ LOOP:
 --:-:-:-:1      ISCADD  cy00, blkA, cy00, 7;
 
 // C += (cy*ldc + cx) * 4;
---:-:-:-:1      MOV  ldc, param_ldc;
---:-:-:-:1      XMAD.LO ci, cy00, ldc, cx, xmad_c;
+// C += (ldcz*blockZ + ldc*cy + cx00) * 4;
+--:-:-:-:1      MOV  ldc,  param_ldc;
+--:-:-:-:1      MOV  ldcz, param_ldcz;
+--:-:-:-:1      XMAD.LO  ci, ldc,  cy00, cx, xmad_c;
+--:-:-:-:1      XMAD.LO2 ci, ldcz, blkZ, ci;
 --:-:-:-:1      LEA      C00y0.CC, ci, param_C[0],     2;
 --:-:-:-:1      LEA.HI.X C00y1,    ci, param_C[1], RZ, 2;
 
