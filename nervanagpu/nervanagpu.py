@@ -1179,6 +1179,10 @@ class NervanaGPU(object):
     def take(self, a, indices, axis, out=None):
         return a.take(indices, axis, out)
 
+    def onehot(self, indices, axis, out=None):
+        if axis not in (0,1):
+            raise ValueError("bad axis for onehot")
+        return OpTreeNode.build("onehot", None, None, idx=indices, axis=axis, out=out)
 
 # For constructing an op tree used in lazy evaluation
 class OpTreeNode(tuple):

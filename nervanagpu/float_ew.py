@@ -363,6 +363,17 @@ _ew_strings = {
         "output"    : "*(a_out + __ldg(take_out)) = {0};\n        take_out += THREADS;",
 
     },
+    "onehot0" : {
+        "arguments" : "const int* onehot{0}_in",
+        "inits"     : "onehot{0}_in += tid;",
+        "loads"     : "int onehot{0} = __ldg(onehot{0}_in);\n"
+              "        onehot{0}_in += THREADS;",
+    },
+    "onehot1" : {
+        "arguments" : "const int* onehot{0}_in",
+        "inits"     : "int onehot{0} = __ldg(onehot{0}_in + bid);\n",
+        "loads"     : "",
+    },
     "const" : {
         "arguments" : "float c{0}",
     },
@@ -429,6 +440,7 @@ _float_ops = {
     "tanh"    : (1, "float {0} = tanhf({1});"   ),
     "tanh2"   : (1, "float {0} = (exp2f(2.0f*{1}) - 1.0f) / (exp2f(2.0f*{1}) + 1.0f);" ),
     "rand"    : (0, "float {0} = frand(lfsr0, lfsr1, lfsr2);"),
+    "onehot"  : (0, "float {0} = {1} == {2};"),
 }
 
 _reduction_ops = {
@@ -789,6 +801,20 @@ def _get_compound_kernel(type_args):
                     for i in range(num_ops):
                         op_list.append(stack.pop())
 
+                    if arg_type == "onehot":
+
+                        hot_axis = arg[2]
+                        test_val = "i" if hot_axis else "bid"
+
+                        ew_in = _ew_strings[arg_type + str(hot_axis)]
+                        loads = "loads%d" % stage
+                        template_vals["arguments"].append(ew_in["arguments"].format(arg_id))
+                        template_vals["inits"    ].append(ew_in["inits"    ].format(arg_id))
+                        template_vals[loads      ].append(ew_in["loads"    ].format(arg_id))
+                        op_list.append("onehot%d" % arg_id)
+                        op_list.append(test_val)
+                        sig += "P"
+
                     template_vals[ops].append(op_code.format(*op_list))
 
                     stack.append(op_list[0])
@@ -887,9 +913,10 @@ def call_compound_kernel(rand_state, *args):
     axis = 1
     for arg in args:
         if type(arg) is dict:
-            if arg["op"] in _reduction_ops:
+            op_name = arg["op"]
+            if op_name in _reduction_ops:
 
-                if arg["op"][0:3] == "arg":
+                if op_name[0:3] == "arg":
                     argminmax = True
 
                 # To reduce a whole tensor (axis=None) reduce along each axis in succession.
@@ -903,6 +930,8 @@ def call_compound_kernel(rand_state, *args):
                 else:
                     reduction = True
                     axis = arg["axis"]
+            elif op_name == "onehot":
+                takeop = True
 
         elif isinstance(arg, ng.GPUTensor):
             if len(arg.shape) < 2 or arg.shape[0] == 1 or arg.shape[1] == 1:
@@ -922,10 +951,11 @@ def call_compound_kernel(rand_state, *args):
         # Array operand
         if isinstance(arg, ng.GPUTensor):
 
-            # use the more efficient dimensions if this is a plain ew op.
+            # for complex operations, use the native dimensions
             if len(arg.shape) == 2 and (broadcast or reduction or transpose or takeop):
                 shape   = arg.shape
                 strides = list(arg.strides[::stride_order])
+            # use more efficient 2d dimensions if this is a plain ew op.
             else:
                 shape   = arg.shape_ew
                 strides = list(arg.strides_ew[::stride_order])
@@ -1042,6 +1072,15 @@ def call_compound_kernel(rand_state, *args):
                         threads = 256
 
                     type_args.append((op_name, op_cnt, rounding > 0, threads))
+
+                elif op_name == "onehot":
+
+                    # flip the one hot axis if reducing axis=0
+                    hot_axis = arg["axis"] if axis else 1 - arg["axis"]
+
+                    type_args.append((op_name, op_cnt, hot_axis))
+                    shape_stack.append(max_shape)
+                    kernel_args.append(arg["idx"].gpudata)
 
                 else:
                     type_args.append((op_name, op_cnt))
