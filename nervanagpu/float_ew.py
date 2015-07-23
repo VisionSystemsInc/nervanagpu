@@ -93,7 +93,7 @@ _stage_template = {
 
     "red_ops" :r"""
 
-    %(ops{0})s
+        %(ops{0})s
 """,
 
     "red_out" : r"""
@@ -415,7 +415,7 @@ _float_ops = {
     "add"     : (2, 'float {0} = {2} + {1};' ),
     "sub"     : (2, 'float {0} = {2} - {1};' ),
     "mul"     : (2, 'float {0} = {2} * {1};' ),
-    "div"     : (2, 'float {0} = __fdividef({2}, {1});' ),
+    "div"     : (2, 'float {0} = {2} / {1};' ),
     "eq"      : (2, "float {0} = {2} == {1};"   ),
     "ne"      : (2, "float {0} = {2} != {1};"   ),
     "lt"      : (2, "float {0} = {2} <  {1};"   ),
@@ -481,21 +481,132 @@ _reduction_ops = {
     },
 }
 
+# rebuild a mutable tree from the stack
+# with each op node flag whether it is scalar or not
+def _build_tree(type_args):
 
-def _get_module(template, template_vals):
+    stack = list()
+    for arg in type_args:
+        arg_type = arg[0]
+        if arg_type in _float_ops:
+            numops = _float_ops[arg_type][0]
+            if numops > 0:
+                node = [arg, 1]
+            else:
+                node = [arg, 0] # ops with zero args default to non-scalar
+            for i in range(numops):
+                operand = stack.pop()
+                if type(operand) is list:
+                    if operand[1] == 0:
+                        node[1] = 0
+                elif operand[0] is ng.GPUTensor and operand[1] > 0:
+                    node[1] = 0
+                node.insert(2, operand)
+            stack.append(node)
 
-    # print template, "\n\n"
-    # for k in sorted(template_vals.keys()): print(k, template_vals[k])
+        elif arg_type in _reduction_ops:
+            stack.append([arg, 1, stack.pop(),])
 
-    code = template % template_vals
+        else:
+            stack.append(arg)
 
-    # print "Compiling %s" % template_vals["name"]
-    # f = open("kernel.cu", "w")
-    # f = open("%s.cu" % template_vals["name"], "w")
-    # print >>f, code
-    # f.close()
+    return stack[0]
 
-    return SourceModule(code, options=[ "--use_fast_math" ], keep=False) #,"-G"
+# for debugging
+def _print_tree(node, level=0):
+
+    if type(node) is list:
+        print ("    " * level) + str(node[0]) + " " + str(node[1])
+        if len(node) > 2:
+            _print_tree(node[2], level+1)
+        if len(node) > 3:
+            _print_tree(node[3], level+1)
+    else:
+        print ("    " * level) + str(node)
+
+# generate a stack from a portion of the tree
+def _post_order(node, stack=None):
+
+    if stack is None: 
+        stack = list()
+
+    if type(node) is list:
+        if len(node) > 2:
+            _post_order(node[2], stack)
+        if len(node) > 3:
+            _post_order(node[3], stack)
+        stack.append(node[0])
+    else:
+        stack.append(node)
+    return stack
+
+def _split_stages(node, reductions=None, stages=None, scalar_parent=None):
+
+    # init data structures
+    if reductions is None:
+        reductions = dict()
+        stages     = list()
+
+    if type(node) is list:
+
+        # keep track of the top of the tree of scalar post reduction operations
+        # exclude assignment op
+        if scalar_parent is None and node[1] == 1 and node[0][0] != "assign":
+            scalar_parent = node
+        elif scalar_parent is not None and node[1] == 0:
+            scalar_parent = None
+        
+        # post order traversal (pulls the reductions deepest in the tree first)
+        if len(node) > 2:
+            _split_stages(node[2], reductions, stages, scalar_parent)
+        if len(node) > 3:
+            _split_stages(node[3], reductions, stages, scalar_parent)
+
+        if node[0][0] in _reduction_ops:
+
+            # generate a unique key for the stack of everything below this reduction
+            red_stack = _post_order(node)
+            red_key   = list()
+            for a in red_stack:
+                # for operations, just append the name
+                if type(a[0]) is str:
+                    red_key.append(a[0])
+                # For tensor or constant, append type and id.
+                # Note that constants have unique ids and will prevent
+                # duplicate detection.  Need to know diff between constants that
+                # can change or are actually static... save for another day.
+                # TODO: this has implications for cached execution plans.
+                else:
+                    red_key.append(tuple(a[0:2]))
+            red_key = tuple(red_key)
+
+            # if this is a duplicate, replace the stack with the op node of the original reduction
+            red_node = reductions.get(red_key, False)
+            if red_node:
+                node[0] = red_node
+            else:
+                # first time seeing this reduction, record it in the dict
+                # the last item in the stack will be the reduction op
+                reductions[red_key] = red_stack[-1]
+                # also record the order of this reduction with respect to others (the dict doesn't preserve this)
+                stages.append(("reduction",red_stack))
+
+            #drop everything in the tree below this reduction
+            node.pop()
+
+            # print "scalar_parent:"
+            # _print_tree(scalar_parent)
+
+            # if there are any scalar operations over this reduction, remove them from the tree as well
+            if scalar_parent is not node:
+
+                scalar_stack = _post_order(scalar_parent)
+                stages.append(("scalar",scalar_stack))
+                scalar_parent[0] = scalar_stack[-1]
+                while len(scalar_parent) > 2:
+                    scalar_parent.pop()
+
+    return stages
 
 def _init_rand(template_vals):
 
@@ -507,186 +618,103 @@ def _init_rand(template_vals):
 @context_dependent_memoize
 def _get_compound_kernel(type_args):
 
-    post_reduction = False
-    dup_reduction  = dict()
-    placeholders   = set(("common","arguments","inits","finish","loads0","ops0"))
-    stage_map      = dict()
-    stage_type     = "loop"
-    stage          = 0
-    stack          = []
-    threads        = type_args[-1][3]
+    # from the stack, rebuild a mutable tree
+    tree = _build_tree(type_args)
+    # _print_tree(tree)
+    # exit()
 
-    # Do a first pass over the stack to find out to which stage each
-    # tensor and operation belong.
-    for arg_i, arg in enumerate(type_args):
+    # split all reductions and post reduction scalar operations out of the tree
+    # sub-trees are converted to stacks and pushed onto stage list
+    stages = _split_stages(tree)
+    # _print_tree(tree)
+    
+    #import ipdb; ipdb.set_trace()
 
-        arg_type = arg[0]
-        if arg_type == "assign":
+    # set the final stage type to type of output (scalar or elementwise)
+    last_stage = "red_out" if tree[1] == 1 else "ew_out"
+    # convert the remainder of tree to stack
+    stages.append((last_stage, _post_order(tree)))
 
-            # if we didn't start a new ew stage, we need a special output
-            # stage for reduction
-            if post_reduction:
-                stage     += 1
-                stage_type = "red_out"
-                placeholders.add("ops%d" % stage)
-                post_reduction = False
+    # for stage, stage_data in enumerate(stages):
+    #     print stage_data[0], stage
+    #     for s in stage_data[1]: print s
+    #     print
 
-            stage_map[arg_i] = (stage,stage_type)
-            for i in range(2):
-                operand_i, operand = stack.pop()
-                if operand[0] is ng.GPUTensor:
-                    stage_map[operand_i] = (stage,stage_type)
-
-        elif arg_type in _float_ops:
-
-            # For each tensor argument asign the stage that it belongs to.
-            for i in range(_float_ops[arg_type][0]):
-                operand_i, operand = stack.pop()
-                if operand[0] is ng.GPUTensor:
-                    # If we are in post reduction and see a tensor we need to
-                    # switch stages to an ew loop.
-                    if post_reduction:
-                        stage     += 1
-                        stage_type = "loop"
-                        placeholders.add("loads%d" % stage)
-                        placeholders.add("ops%d"   % stage)
-                        post_reduction = False
-
-                stage_map[operand_i] = (stage,stage_type)
-
-            # just append the temp float as a placeholder
-            stack.append((-1,(float,)))
-
-            # Tie this operation to a stage
-            stage_map[arg_i] = (stage,stage_type)
-
-        # Each time we do a reduction we need to setup a new elementwise loop
-        elif arg_type in _reduction_ops:
-
-            # It's possible to have back to back reductions.
-            # If so start a new ew loop stage.
-            if post_reduction:
-                stage     += 1
-                stage_type = "loop"
-                placeholders.add("loads%d" % stage)
-                placeholders.add("ops%d"   % stage)
-
-            # Tie this operation to a stage
-            stage_map[arg_i] = (stage,stage_type)
-
-            # Tie a tensor to the stage if one precedes the reduction.
-            operand_i, operand = stack.pop()
-            if operand[0] is ng.GPUTensor:
-                stage_map[operand_i] = (stage,stage_type)
-
-            # just append the temp float as a placeholder
-            stack.append((-1,(float,)))
-
-            # generate a unique signature for this reduction op
-            red_sig = []
-            for i, a in enumerate(type_args):
-                # find everything tied to this stage
-                if i in stage_map and stage_map[i][0] == stage:
-                    # for operations, just append the name
-                    if type(a[0]) is str:
-                        red_sig.append(a[0])
-                    # For tensor or constant, append type and id.
-                    # Note that constants have unique ids and will prevent
-                    # duplicate detection.  Need to know diff between constants that
-                    # can change or are actually static... save for another day.
-                    # TODO: this has implications for cached execution plans.
-                    else:
-                        red_sig.append(tuple(a[0:2]))
-            red_sig = tuple(red_sig)
-
-            # Look for duplicate reductions
-            if red_sig in dup_reduction:
-                # remove duplicate placeholders
-                placeholders.remove("loads%d" % stage)
-                placeholders.remove("ops%d"   % stage)
-                # print "dup: ", stage, arg[1], red_sig, dup_reduction[red_sig]
-                # link the dup stage with the original
-                dup_reduction[stage] = dup_reduction[red_sig]
-            else:
-                # tie each reduction signature to its stage
-                dup_reduction[red_sig] = stage
-
-                # finish building the reduction stage
-                placeholders.add("shfl_red%d" % stage)
-                if threads > 32:
-                    placeholders.add("var_red%d"    % stage)
-                    placeholders.add("share1_red%d" % stage)
-                    placeholders.add("share2_red%d" % stage)
-
-            # The ops section begins a new stage
-            # We could try and find the longest common op string and reuse these ops
-            # along with the reduction but it's not worth the complication.
-            stage     += 1
-            stage_type = "red_ops"
-            placeholders.add("ops%d" % stage)
-
-            post_reduction = True
-
-        else:
-            # build the stack with the operands
-            stack.append((arg_i, arg))
-
-    # print "\n".join(str(stage_map[i]) + " " + str(s) for i,s in enumerate(type_args))
-    # print "\n"
-    # print "\n".join(str(s) for s in placeholders)
-    #exit()
-
-    sig           = "P" # first param for rand_state
-    stack         = []
+    stack         = list()
+    placeholders  = list()
+    stage_out_reg = dict()
+    arg_dict      = dict()
     array_ids     = set()
     fp16In        = False
     rand_init     = False
     rand_func     = False
-    current_stage = None
-    stack         = []
-    red_regsiters = {}
+    threads       = type_args[-1][3]
     template      = _ew_template
-    template_vals = { "threads" : threads, "name" : _get_kernel_name() }
-    for key in placeholders:
-        template_vals[key] = []
+    template_vals = { 
+        "threads" : threads, 
+        "name"    : _get_kernel_name(),
+        "common"  : list(),
+        "inits"   : list(),
+        "finish"  : list(),
+    }
 
-    for arg_i, arg in enumerate(type_args):
+    for stage, stage_data in enumerate(stages):
 
-        arg_type, arg_id = arg[0:2]
+        stage_type, stage_stack = stage_data
+        new_placeholders = list()
 
-        stage, stage_type = stage_map[arg_i]
+        # build out the template as we process stages
+        if stage_type == "reduction":
 
-        # build out the template as we process operations (strings)
-        if type(arg_type) is str:
-            # don't build duplicate stages
-            if stage not in dup_reduction:
-                # build the template as the stage and stage_type combination changes
-                if current_stage != stage_map[arg_i]:
-                    current_stage = stage_map[arg_i]
-                    template += _stage_template[stage_type].format(stage)
-                # the reduction op shares the stage with its loop
-                # so append that separately here.
-                if arg_type in _reduction_ops:
-                    if threads > 32:
-                        template += _stage_template["red"].format(stage)
-                    else:
-                        template += _stage_template["red32"].format(stage)
+            new_placeholders.append("loads%d"    % stage)
+            new_placeholders.append("ops%d"      % stage)
+            new_placeholders.append("shfl_red%d" % stage)
+            template += _stage_template["loop"].format(stage)
+            if threads > 32:
+                new_placeholders.append("var_red%d"    % stage)
+                new_placeholders.append("share1_red%d" % stage)
+                new_placeholders.append("share2_red%d" % stage)
+                template += _stage_template["red"].format(stage)
             else:
-                current_stage = stage_map[arg_i]
+                template += _stage_template["red32"].format(stage)
 
-        # Array operands
-        if arg_type is ng.GPUTensor:
+        elif stage_type == "scalar":
 
-            dtype, take_axis = arg[2:4]
+            new_placeholders.append("ops%d" % stage)
+            template += _stage_template["red_ops"].format(stage)
 
-            if stage not in dup_reduction:
+        elif stage_type == "red_out":
+            
+            new_placeholders.append("ops%d" % stage)
+            template += _stage_template["red_out"].format(stage)
+
+        else: # ew_out
+
+            new_placeholders.append("loads%d" % stage)
+            new_placeholders.append("ops%d"   % stage)
+            template += _stage_template["loop"].format(stage)
+
+        for key in new_placeholders:
+            template_vals[key] = []
+        placeholders.extend(new_placeholders)
+
+        for arg_i, arg in enumerate(stage_stack):
+
+            arg_type, arg_id = arg[0:2]
+
+            # Array operands
+            if arg_type is ng.GPUTensor:
+
+                dtype, take_axis = arg[2:4]
+
+                is_out_tensor = True if stage == len(stages)-1 and arg_i == 0 else False
 
                 # first arg is output array, don't put on stack
-                if arg_i > 0:
-                    stack.append("a%d" % arg_id)
-                else:
+                if is_out_tensor:
                     out_dtype = dtype
                     out_take  = take_axis
+                else:
+                    stack.append("a%d" % arg_id)
 
                 # 0: arg_id, 1: stage, 2: type, 3: cvt
                 ew_dtype = _ew_types[dtype]
@@ -696,93 +724,94 @@ def _get_compound_kernel(type_args):
                 if arg_id not in array_ids:
 
                     array_ids.add(arg_id)
-                    array_ids.add((arg_id,stage))
-
-                    sig += "Pii"
+                    array_ids.add((arg_id, stage))
+                    
+                    sig = "Pii"
                     if take_axis > 0:
                         sig += "P"
 
-                    # input tensors
-                    if arg_i > 0:
-                        ew_in = _ew_strings["in%d" % take_axis]
-                        loads = "loads%d" % stage
-                        template_vals["arguments"].append(ew_in["arguments"].format(*fmt))
-                        template_vals["inits"    ].append(ew_in["inits"    ].format(*fmt))
-                        template_vals[loads      ].append(ew_in["loads"    ].format(*fmt))
                     # output tensor
+                    if is_out_tensor:
+                        ew_out    = _ew_strings["out%d" % take_axis]
+                        arguments = ew_out["arguments"].format(*fmt)
+                        template_vals["inits"].append(ew_out["inits"].format(*fmt))
+                    # input tensors
                     else:
-                        ew_out = _ew_strings["out%d" % take_axis]
-                        for key in ("arguments","inits"):
-                            template_vals[key].append(ew_out[key].format(*fmt))
+                        ew_in     = _ew_strings["in%d" % take_axis]
+                        loads     = "loads%d" % stage
+                        arguments = ew_in["arguments"].format(*fmt)
+                        template_vals["inits"].append(ew_in["inits"].format(*fmt))
+                        template_vals[ loads ].append(ew_in["loads"].format(*fmt))
 
                     if dtype == 'f2' and not fp16In:
                         template_vals["common"].append(_common_fp16_to_fp32)
                         fp16In = True
 
+                    arg_dict[arg] = (sig, arguments)
+
                 # Subsequent times we see a tensor just initialize inits and loads
-                # But only for arrays of diferent non-dup stages
-                elif (arg_id,stage) not in array_ids:
-                    array_ids.add((arg_id,stage))
+                elif (arg_id, stage) not in array_ids:
                     ew_in = _ew_strings["in%d" % take_axis]
                     loads = "loads%d" % stage
                     template_vals["inits"].append(ew_in["inits"].format(*fmt))
                     template_vals[loads  ].append(ew_in["loads"].format(*fmt))
 
-        # Constant operands
-        elif arg_type is float:
+            # Constant operands
+            elif arg_type is float:
 
-            sig  += "f"
-            if stage not in dup_reduction:
                 stack.append("c%d" % arg_id)
-                ew_const = _ew_strings["const"]
-                template_vals["arguments"].append(ew_const["arguments"].format(arg_id))
+                arg_dict[arg] = ("f", _ew_strings["const"]["arguments"].format(arg_id))
 
-        # Operations (arg_type = op_name)
-        else:
+            # Operations (arg_type = op_name)
+            else:
 
-            if arg_type == "assign":
+                if arg_type == "assign":
 
-                ops = "ops%d" % stage
+                    ops = "ops%d" % stage
 
-                # loop end condition for last stage
-                sig += "i"
-                template_vals["arguments"].append("const int n%d" % stage)
+                    # loop end condition for last stage
+                    sig = "i"
+                    arguments = ["const int n%d" % stage]
 
-                # rounding mode
-                if arg[2]:
-                    mode = "random"
-                    sig += "i"
-                    template_vals["arguments"].append("const int mantissa_bits")
-                    if not rand_init:
-                        rand_init = _init_rand(template_vals)
-                    template_vals["inits"].append(_init_rand_round_func)
-                else:
-                    mode = "nearest"
+                    # rounding mode
+                    if arg[2]:
+                        mode = "random"
+                        sig += "i"
+                        arguments.append("const int mantissa_bits")
+                        if not rand_init:
+                            rand_init = _init_rand(template_vals)
+                        template_vals["inits"].append(_init_rand_round_func)
+                    else:
+                        mode = "nearest"
 
-                out_val   = stack.pop()
-                # if the last stack value came from an argmax/min just do implicit type conversion
-                if out_val[0] == "i" and out_dtype[0] in "iu":
-                    ew_round = None
-                else:
-                    ew_round  = _ew_strings["round"][mode].get(out_dtype, None)
-                    ew_common = _common_round[mode].get(out_dtype, None)
-                    if ew_common:
-                        template_vals["common"].append(ew_common)
+                    arg_dict[arg] = (sig, ", ".join(arguments))
 
-                if ew_round:
-                    round_val = "r%d" % arg_id
-                    template_vals[ops].append(ew_round.format(round_val, out_val))
-                else:
-                    round_val = out_val
+                    out_val = stack.pop()
+                    # if the last stack value came from an argmax/min just do implicit type conversion
+                    if out_val[0] == "i" and out_dtype[0] in "iu":
+                        ew_round = None
+                    else:
+                        ew_round  = _ew_strings["round"][mode].get(out_dtype, None)
+                        ew_common = _common_round[mode].get(out_dtype, None)
+                        if ew_common:
+                            template_vals["common"].append(ew_common)
 
-                template_vals[ops].append(_ew_strings["out%d" % out_take]["output"].format(round_val))
+                    if ew_round:
+                        round_val = "r%d" % arg_id
+                        template_vals[ops].append(ew_round.format(round_val, out_val))
+                    else:
+                        round_val = out_val
 
-            elif arg_type in _float_ops:
+                    template_vals[ops].append(_ew_strings["out%d" % out_take]["output"].format(round_val))
 
-                if len(template_vals["name"]) < 16:
-                    template_vals["name"].append(arg_type)
+                elif arg in stage_out_reg:
 
-                if stage not in dup_reduction:
+                    stack.append(stage_out_reg[arg])
+
+                elif arg_type in _float_ops:
+
+                    if len(template_vals["name"]) < 16:
+                        template_vals["name"].append(arg_type)
 
                     ops = "ops%d" % stage
 
@@ -808,33 +837,33 @@ def _get_compound_kernel(type_args):
 
                         ew_in = _ew_strings[arg_type + str(hot_axis)]
                         loads = "loads%d" % stage
-                        template_vals["arguments"].append(ew_in["arguments"].format(arg_id))
-                        template_vals["inits"    ].append(ew_in["inits"    ].format(arg_id))
-                        template_vals[loads      ].append(ew_in["loads"    ].format(arg_id))
+                        template_vals["inits"].append(ew_in["inits"].format(arg_id))
+                        template_vals[ loads ].append(ew_in["loads"].format(arg_id))
                         op_list.append("onehot%d" % arg_id)
                         op_list.append(test_val)
-                        sig += "P"
+
+                        arg_dict[arg] = ("P", ew_in["arguments"].format(arg_id))
 
                     template_vals[ops].append(op_code.format(*op_list))
 
-                    stack.append(op_list[0])
+                    # if this is the last op on the current stack, store its register stage
+                    # in the stage output dict
+                    if arg_i == len(stage_stack)-1:
+                        stage_out_reg[arg] = op_list[0]
+                    # otherwise push the reg onto the stack as normal
+                    else:
+                        stack.append(op_list[0])
 
-            elif arg_type in _reduction_ops:
+                elif arg_type in _reduction_ops:
 
-                if len(template_vals["name"]) < 16:
-                    template_vals["name"].append(arg_type)
+                    if len(template_vals["name"]) < 16:
+                        template_vals["name"].append(arg_type)
 
-                # loop end condition for current stage
-                # add regardless of duplicate reduction stage
-                sig += "i"
-                template_vals["arguments"].append("const int n%d" % stage)
+                    # loop end condition for current stage
+                    # add regardless of duplicate reduction stage
+                    arg_dict[arg] = ("i", "const int n%d" % stage)
 
-                # if this is a duplicate reduction just push the previous
-                # result back onto the stack.
-                if stage in dup_reduction:
-                    stack.append(red_regsiters[dup_reduction[stage]])
-                # Otherwise fill out the reduction template
-                else:
+                    # avoid float conversion for argmax/min
                     reg = "i" if "arg" == arg_type[0:3] else "r"
 
                     ops         = "ops%d"      % stage
@@ -854,30 +883,53 @@ def _get_compound_kernel(type_args):
                         template_vals[shr1_red].append(red_strings["share1_red"].format(red_arg))
                         template_vals[shr2_red].append(red_strings["share2_red"].format(red_arg))
 
-                    stack.append(red_arg)
+                    # reduction ops are always the last on the stack
+                    # just store the register state in the stage output dict
+                    stage_out_reg[arg] = red_arg
 
-                    # remember this register in case a duplicate needs it.
-                    red_regsiters[stage] = red_arg
-
-            else:
-                raise ValueError("Bad op type.")
+                else:
+                    raise ValueError("Bad op type.")
 
     template += _fin_template
+
+    # since we reorderd the operations we need to generate the argument list in the original order
+    sig       = "P"
+    arguments = list()
+    unused    = 1
+    for arg in type_args:
+        params = arg_dict.get(arg, False)
+        if params:
+            sig += params[0]
+            arguments.append(params[1])
+            del arg_dict[arg]
+        # fill in the loop counter for the duplicate reductions that were removed
+        elif arg[0] in _reduction_ops:
+            sig += "i"
+            arguments.append("const int unused%d" % unused)
+            unused += 1
 
     # convert lists to strings
     template_vals["name"]       = "_".join(template_vals["name"])
     template_vals["common"]     = "\n".join(template_vals["common"])
-    template_vals["arguments"]  = ",\n    ".join(template_vals["arguments"])
+    template_vals["arguments"]  = ",\n    ".join(arguments)
     template_vals["inits"]      = "\n    ".join(template_vals["inits"])
     template_vals["finish"]     = "\n".join(template_vals["finish"])
-    for key in ("common","arguments","inits","finish"):
-        placeholders.remove(key)
 
     # add the dynamic placeholders: loads#, ops#, reduction#
     for key in placeholders:
         template_vals[key]      = "\n        ".join(template_vals[key])
 
-    module = _get_module(template, template_vals)
+    # populate the template
+    code = template % template_vals
+
+    # debugging:
+    # print "Compiling %s" % template_vals["name"]
+    # f = open("%s.cu" % template_vals["name"], "w")
+    # f = open("kernel.cu", "w")
+    # print >>f, code
+    # f.close()
+
+    module = SourceModule(code, options=[ "--use_fast_math" ]) # ,"-G" , keep=False
     kernel = module.get_function(template_vals["name"])
     kernel.name = template_vals["name"]
     kernel.prepare(sig)
@@ -1119,6 +1171,7 @@ def call_compound_kernel(rand_state, *args):
     # print "\n".join(str(s) for s in kernel_args)
     # print "\n"
     # print "\n".join(str(s) for s in type_args)
+    # print "\n"
 
     # get or create the kernel in the memoize cache
     kernel = _get_compound_kernel(tuple(type_args))
