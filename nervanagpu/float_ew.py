@@ -481,6 +481,7 @@ _reduction_ops = {
     },
 }
 
+
 # rebuild a mutable tree from the stack
 # with each op node flagged with whether it is scalar or not
 def _build_tree(type_args):
@@ -490,22 +491,23 @@ def _build_tree(type_args):
         arg_type = arg[0]
         if arg_type in _float_ops:
             numops = _float_ops[arg_type][0]
-            if numops > 0:
-                node = [arg, 1]
-            else:
-                node = [arg, 0] # ops with zero args default to non-scalar
+            node = [arg, numops > 0, 0] # ops with zero args default to non-scalar
             for i in range(numops):
                 operand = stack.pop()
                 if type(operand) is list:
+                    node[2] += operand[2]
                     if operand[1] == 0:
-                        node[1] = 0
+                        node[1] = False
                 elif operand[0] is ng.GPUTensor and operand[1] > 0:
-                    node[1] = 0
-                node.insert(2, operand)
+                    node[1] = False
+                node.insert(3, operand)
             stack.append(node)
 
         elif arg_type in _reduction_ops:
-            stack.append([arg, 1, stack.pop(),])
+            operand = stack.pop()
+            reds    = 1
+            if type(operand) is list: reds += operand[2] 
+            stack.append([arg, True, reds, operand])
 
         else:
             stack.append(arg)
@@ -516,11 +518,11 @@ def _build_tree(type_args):
 def _print_tree(node, level=0):
 
     if type(node) is list:
-        print ("    " * level) + str(node[0]) + " " + str(node[1])
-        if len(node) > 2:
-            _print_tree(node[2], level+1)
+        print ("    " * level) + (", ".join(str(s) for s in node[0:3]))
         if len(node) > 3:
             _print_tree(node[3], level+1)
+        if len(node) > 4:
+            _print_tree(node[4], level+1)
     else:
         print ("    " * level) + str(node)
 
@@ -531,10 +533,10 @@ def _post_order(node, stack=None):
         stack = list()
 
     if type(node) is list:
-        if len(node) > 2:
-            _post_order(node[2], stack)
         if len(node) > 3:
             _post_order(node[3], stack)
+        if len(node) > 4:
+            _post_order(node[4], stack)
         stack.append(node[0])
     else:
         stack.append(node)
@@ -542,27 +544,28 @@ def _post_order(node, stack=None):
 
 # Split out all reductions and post reduction scalar operations into seperate stacks (stages)
 # This leaves remaining in the tree anything not in these categories.
-def _split_stages(node, reductions=None, stages=None, scalar_parent=None):
+def _split_stages(node, duplicates=None, aliases=None, stages=None, parents=None):
 
     # init data structures
-    if reductions is None:
-        reductions = dict()
+    if duplicates is None:
+        duplicates = dict()
+        aliases    = set()
         stages     = list()
+        parents    = list()
 
     if type(node) is list:
 
-        # keep track of the top of the tree of scalar post reduction operations
-        # exclude assignment op
-        if scalar_parent is None and node[1] == 1 and node[0][0] != "assign":
-            scalar_parent = node
-        elif scalar_parent is not None and node[1] == 0:
-            scalar_parent = None
-        
+        if node[0][0] != "assign":
+            parents.append(node)
+
         # post order traversal (pulls the reductions deepest in the tree first)
-        if len(node) > 2:
-            _split_stages(node[2], reductions, stages, scalar_parent)
         if len(node) > 3:
-            _split_stages(node[3], reductions, stages, scalar_parent)
+            _split_stages(node[3], duplicates, aliases, stages, parents)
+        if len(node) > 4:
+            _split_stages(node[4], duplicates, aliases, stages, parents)
+
+        if len(parents) > 0:
+            parents.pop()
 
         if node[0][0] in _reduction_ops:
 
@@ -570,42 +573,74 @@ def _split_stages(node, reductions=None, stages=None, scalar_parent=None):
             red_stack = _post_order(node)
             red_key   = list()
             for a in red_stack:
-                # for operations, just append the name
-                if type(a[0]) is str:
+                # for operations, just append the name (unless it's an alias then include id as well)
+                if type(a[0]) is str and a not in aliases:
                     red_key.append(a[0])
                 # For tensor or constant, append type and id.
-                # Note that constants have unique ids and will prevent
-                # duplicate detection.  Need to know diff between constants that
-                # can change or are actually static... save for another day.
-                # TODO: this has implications for cached execution plans.
                 else:
                     red_key.append(tuple(a[0:2]))
             red_key = tuple(red_key)
 
             # if this is a duplicate, replace the stack with the op node of the original reduction
-            red_node = reductions.get(red_key, False)
+            red_node = duplicates.get(red_key, False)
             if red_node:
+                #import ipdb; ipdb.set_trace()
                 node[0] = red_node
             else:
                 # first time seeing this reduction, record it in the dict
                 # the last item in the stack will be the reduction op
-                reductions[red_key] = red_stack[-1]
+                duplicates[red_key] = red_stack[-1]
+                # record which nodes can be aliased 
+                aliases.add(red_stack[-1])
                 # also record the order of this reduction with respect to others (the dict doesn't preserve this)
                 stages.append(("reduction",red_stack))
 
-            #drop everything in the tree below this reduction
+            # drop everything in the tree below this reduction
             node.pop()
 
-            # print "scalar_parent:"
-            # _print_tree(scalar_parent)
+            # decrement reduction count for parents as we go
+            for parent in parents:
+                parent[2] -= 1
+
+            scalar_parent = None
+            # walk up the parent list
+            for parent in parents[::-1]:
+                # find the highest parent that is both scalar and has no other child reductions
+                if parent[1] and parent[2] == 0:
+                    scalar_parent = parent
+                else:
+                    break
 
             # if there are any scalar operations over this reduction, remove them from the tree as well
-            if scalar_parent is not node:
-
+            if scalar_parent is not None:
+                # generate the stack from this subtree
                 scalar_stack = _post_order(scalar_parent)
-                stages.append(("scalar",scalar_stack))
-                scalar_parent[0] = scalar_stack[-1]
-                while len(scalar_parent) > 2:
+                scalar_key   = list()
+                for a in scalar_stack:
+                    # for operations, just append the name (unless it's an alias then include id as well)
+                    if type(a[0]) is str and a not in aliases:
+                        scalar_key.append(a[0])
+                    # For tensor or constant, append type and id.
+                    else:
+                        scalar_key.append(tuple(a[0:2]))
+                scalar_key = tuple(scalar_key)
+
+                # if this is a duplicate, replace the stack with the op node of the original reduction
+                scalar_node = duplicates.get(scalar_key, False)
+                if scalar_node:
+                    #import ipdb; ipdb.set_trace()
+                    scalar_parent[0] = scalar_node
+                else:
+                    # first time seeing this reduction, record it in the dict
+                    # the last item in the stack will be the reduction op
+                    duplicates[scalar_key] = scalar_stack[-1]
+                    # record which nodes can be aliased 
+                    aliases.add(scalar_stack[-1])
+                    # add it to the stages
+                    stages.append(("scalar",scalar_stack))
+
+                # drop any children
+                while len(scalar_parent) > 3:
                     scalar_parent.pop()
 
     return stages
@@ -623,15 +658,14 @@ def _get_compound_kernel(type_args):
     # from the stack, rebuild a mutable tree
     tree = _build_tree(type_args)
     # _print_tree(tree)
-    # exit()
+    #exit()
 
     # split all reductions and post reduction scalar operations out of the tree
     # sub-trees are converted to stacks and pushed onto stages list
     stages = _split_stages(tree)
     # _print_tree(tree)
+    # exit()
     
-    #import ipdb; ipdb.set_trace()
-
     # set the final stage type to type of output (scalar or elementwise)
     last_stage = "red_out" if tree[1] == 1 else "ew_out"
     # convert the remainder of tree to stack
@@ -641,6 +675,7 @@ def _get_compound_kernel(type_args):
     #     print stage_data[0], stage
     #     for s in stage_data[1]: print s
     #     print
+    #exit()
 
     stack         = list()
     placeholders  = list()
@@ -763,7 +798,8 @@ def _get_compound_kernel(type_args):
             elif arg_type is float:
 
                 stack.append("c%d" % arg_id)
-                arg_dict[arg] = ("f", _ew_strings["const"]["arguments"].format(arg_id))
+                if arg not in arg_dict:
+                    arg_dict[arg] = ("f", _ew_strings["const"]["arguments"].format(arg_id))
 
             # Operations (arg_type = op_name)
             else:
@@ -952,6 +988,7 @@ def call_compound_kernel(rand_state, *args):
     arg_cnt     = 0
     op_cnt      = 0
     array_ids   = {}
+    const_ids   = {}
     kernel_args = [ rand_state, ]
     type_args   = []
     shape_stack = []
@@ -1071,10 +1108,17 @@ def call_compound_kernel(rand_state, *args):
         # Constant operand
         elif type(arg) in (int, float):
 
-            kernel_args.append(float(arg))
-            type_args.append((float, arg_cnt))
+            arg = float(arg)
+            if arg in const_ids:
+                indx = const_ids[arg]
+            else:
+                indx = const_ids[arg] = arg_cnt
+                arg_cnt += 1
+                
+                kernel_args.append(arg)
+
+            type_args.append((float, indx))
             shape_stack.append((1,1))
-            arg_cnt += 1
 
         # Operation
         elif type(arg) is dict:
