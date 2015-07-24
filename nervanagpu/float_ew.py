@@ -483,7 +483,9 @@ _reduction_ops = {
 
 
 # rebuild a mutable tree from the stack
-# with each op node flagged with whether it is scalar or not
+# flag each op node with whether it is scalar or not
+# also include a count of reductions under this node:
+# node: [ arg(op, tensor or const), is_scalar, red_count, left_child, right_child ]
 def _build_tree(type_args):
 
     stack = list()
@@ -491,34 +493,46 @@ def _build_tree(type_args):
         arg_type = arg[0]
         if arg_type in _float_ops:
             numops = _float_ops[arg_type][0]
-            node = [arg, numops > 0, 0] # ops with zero args default to non-scalar
+            # ops with zero args default to non-scalar
+            node = [arg, numops > 0, 0]
             for i in range(numops):
                 operand = stack.pop()
+                # if child is another node in the tree:
                 if type(operand) is list:
+                    # accumulate reduction count
                     node[2] += operand[2]
+                    # if a child is not scalar, then neither is this node
                     if operand[1] == 0:
                         node[1] = False
+                # if child is an input tensor (an output tensor has id=0) then this node is not scalar
                 elif operand[0] is ng.GPUTensor and operand[1] > 0:
                     node[1] = False
+                # children start at position 3 and are added in reverse order
                 node.insert(3, operand)
             stack.append(node)
 
         elif arg_type in _reduction_ops:
             operand = stack.pop()
             reds    = 1
-            if type(operand) is list: reds += operand[2] 
+            # if child is another node accumulate reduction count
+            if type(operand) is list: 
+                reds += operand[2] 
+            # reductions are scalar by definition
             stack.append([arg, True, reds, operand])
 
         else:
+            # tensors and scalars just get added to the stack
+            # for later processing with operators
             stack.append(arg)
 
+    # the stack should now contain just a single node which is the complete tree
     return stack[0]
 
 # for debugging
 def _print_tree(node, level=0):
 
     if type(node) is list:
-        print ("    " * level) + (", ".join(str(s) for s in node[0:3]))
+        print ("    " * level) + ", ".join(str(s) for s in node[0:3])
         if len(node) > 3:
             _print_tree(node[3], level+1)
         if len(node) > 4:
@@ -542,6 +556,45 @@ def _post_order(node, stack=None):
         stack.append(node)
     return stack
 
+# Takes a node from the tree and searchs for any previously processed duplicates.
+# If not a duplicate, returns a stage based from that node.
+# If a duplicate, the node is replaced with an alias to the dup stage.
+# In both cases the tree is removed below this node (and the alias remains).
+def _process_node(node, aliases, duplicates):
+
+    # generate a unique key from the stack of everything below this reduction
+    stack = _post_order(node)
+    key   = list()
+    for item in stack:
+        # for operations, just append the name
+        # aliases require the id as well since they encapsulate specific tensors and constants
+        if type(item[0]) is str and item not in aliases:
+            key.append(item[0])
+        # For tensor or constant or alias, append type and id.
+        else:
+            key.append(item[0:2])
+    key = tuple(key)
+
+    # use the generated key to look for duplicates
+    dup_node = duplicates.get(key, False)
+    if dup_node:
+        # if this is a duplicate, replace the stack with the op node of the original reduction
+        node[0] = dup_node
+        # no new stage is returned in this case, the node is just converted into an alias
+        stack = None
+    else:
+        # first time seeing this reduction, record it in the dict
+        # the last item in the stack will be the reduction op
+        duplicates[key] = stack[-1]
+        # record which nodes can be aliased 
+        aliases.add(stack[-1])
+
+    # drop any children (children start at position 3)
+    while len(node) > 3:
+        node.pop()
+
+    return stack
+
 # Split out all reductions and post reduction scalar operations into seperate stacks (stages)
 # This leaves remaining in the tree anything not in these categories.
 def _split_stages(node, duplicates=None, aliases=None, stages=None, parents=None):
@@ -555,10 +608,12 @@ def _split_stages(node, duplicates=None, aliases=None, stages=None, parents=None
 
     if type(node) is list:
 
+        # don't count assignment node as a parent, 
+        # it will always exist in the final stage which is processed outside of this function
         if node[0][0] != "assign":
             parents.append(node)
 
-        # post order traversal (pulls the reductions deepest in the tree first)
+        # post order traversal (pulls the stages deepest in the tree first)
         if len(node) > 3:
             _split_stages(node[3], duplicates, aliases, stages, parents)
         if len(node) > 4:
@@ -569,41 +624,18 @@ def _split_stages(node, duplicates=None, aliases=None, stages=None, parents=None
 
         if node[0][0] in _reduction_ops:
 
-            # generate a unique key for the stack of everything below this reduction
-            red_stack = _post_order(node)
-            red_key   = list()
-            for a in red_stack:
-                # for operations, just append the name (unless it's an alias then include id as well)
-                if type(a[0]) is str and a not in aliases:
-                    red_key.append(a[0])
-                # For tensor or constant, append type and id.
-                else:
-                    red_key.append(tuple(a[0:2]))
-            red_key = tuple(red_key)
-
-            # if this is a duplicate, replace the stack with the op node of the original reduction
-            red_node = duplicates.get(red_key, False)
-            if red_node:
-                #import ipdb; ipdb.set_trace()
-                node[0] = red_node
-            else:
-                # first time seeing this reduction, record it in the dict
-                # the last item in the stack will be the reduction op
-                duplicates[red_key] = red_stack[-1]
-                # record which nodes can be aliased 
-                aliases.add(red_stack[-1])
-                # also record the order of this reduction with respect to others (the dict doesn't preserve this)
+            red_stack = _process_node(node, aliases, duplicates)
+            if red_stack:
+                # add this reduction stack to the stages
                 stages.append(("reduction",red_stack))
 
-            # drop everything in the tree below this reduction
-            node.pop()
-
-            # decrement reduction count for parents as we go
+            # decrement reduction count for all parents
             for parent in parents:
                 parent[2] -= 1
 
-            scalar_parent = None
             # walk up the parent list
+            # TODO: potentially do this iteratively to find longest common set of operations
+            scalar_parent = None
             for parent in parents[::-1]:
                 # find the highest parent that is both scalar and has no other child reductions
                 if parent[1] and parent[2] == 0:
@@ -613,35 +645,11 @@ def _split_stages(node, duplicates=None, aliases=None, stages=None, parents=None
 
             # if there are any scalar operations over this reduction, remove them from the tree as well
             if scalar_parent is not None:
-                # generate the stack from this subtree
-                scalar_stack = _post_order(scalar_parent)
-                scalar_key   = list()
-                for a in scalar_stack:
-                    # for operations, just append the name (unless it's an alias then include id as well)
-                    if type(a[0]) is str and a not in aliases:
-                        scalar_key.append(a[0])
-                    # For tensor or constant, append type and id.
-                    else:
-                        scalar_key.append(tuple(a[0:2]))
-                scalar_key = tuple(scalar_key)
 
-                # if this is a duplicate, replace the stack with the op node of the original reduction
-                scalar_node = duplicates.get(scalar_key, False)
-                if scalar_node:
-                    #import ipdb; ipdb.set_trace()
-                    scalar_parent[0] = scalar_node
-                else:
-                    # first time seeing this reduction, record it in the dict
-                    # the last item in the stack will be the reduction op
-                    duplicates[scalar_key] = scalar_stack[-1]
-                    # record which nodes can be aliased 
-                    aliases.add(scalar_stack[-1])
-                    # add it to the stages
+                scalar_stack = _process_node(scalar_parent, aliases, duplicates)
+                if scalar_stack:
+                    # add this scalar stack to the stages
                     stages.append(("scalar",scalar_stack))
-
-                # drop any children
-                while len(scalar_parent) > 3:
-                    scalar_parent.pop()
 
     return stages
 
@@ -675,7 +683,7 @@ def _get_compound_kernel(type_args):
     #     print stage_data[0], stage
     #     for s in stage_data[1]: print s
     #     print
-    #exit()
+    # exit()
 
     stack         = list()
     placeholders  = list()
