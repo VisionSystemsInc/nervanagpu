@@ -482,7 +482,7 @@ _reduction_ops = {
 }
 
 # rebuild a mutable tree from the stack
-# with each op node flag whether it is scalar or not
+# with each op node flagged with whether it is scalar or not
 def _build_tree(type_args):
 
     stack = list()
@@ -540,6 +540,8 @@ def _post_order(node, stack=None):
         stack.append(node)
     return stack
 
+# Split out all reductions and post reduction scalar operations into seperate stacks (stages)
+# This leaves remaining in the tree anything not in these categories.
 def _split_stages(node, reductions=None, stages=None, scalar_parent=None):
 
     # init data structures
@@ -624,7 +626,7 @@ def _get_compound_kernel(type_args):
     # exit()
 
     # split all reductions and post reduction scalar operations out of the tree
-    # sub-trees are converted to stacks and pushed onto stage list
+    # sub-trees are converted to stacks and pushed onto stages list
     stages = _split_stages(tree)
     # _print_tree(tree)
     
