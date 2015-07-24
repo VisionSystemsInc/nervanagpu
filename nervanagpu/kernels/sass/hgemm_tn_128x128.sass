@@ -29,8 +29,8 @@
     param_B[1]      : c[0x0][0x154]
     param_C[0]      : c[0x0][0x158]
     param_C[1]      : c[0x0][0x15c]
-    param_lda       : c[0x0][0x160]
-    param_ldb       : c[0x0][0x164]
+    param_lda8      : c[0x0][0x160]
+    param_ldb8      : c[0x0][0x164]
     param_ldc       : c[0x0][0x168]
     param_m         : c[0x0][0x16c]
     param_n         : c[0x0][0x170]
@@ -38,11 +38,15 @@
     param_alpha     : c[0x0][0x178]
     param_beta      : c[0x0][0x17c]
     param_flags     : c[0x0][0x180]
+    param_ldaz      : c[0x0][0x184]
+    param_ldbz      : c[0x0][0x188]
+    param_ldcz      : c[0x0][0x18c]
+    param_loops     : c[0x0][0x190]
 </CONSTANT_MAPPING>
 
 <REGISTER_MAPPING>
 
-    64-79   ~ lda, ldb, tid1, ta, tb, tid7, tid15, tidX, blk, dimA, flag
+    64-95   ~ lda, ldb, ldaz, ldbz, tid1, tid7, tid31, tid128, tid15, tbid, tidX, blk, dimA, flag, x<1-3>, y<1-3>
 
     0-63    : czero<00-63>
 
@@ -55,41 +59,39 @@
     33,32,41,40,49,48,57,56 : cx<0-7>y6
     37,36,45,44,53,52,61,60 : cx<0-7>y7
 
-    64-95   ~ x<1-3>, y<1-3>
-
-    80-81   : Rand<0-1>
-
     64-79   : j0Ay<0-7>, j0Bx<0-7>
     80-95   : j1Ay<0-7>, j1Bx<0-7>
 
-    96-103  : loadX<0-7>
     96-103  : loadA<0-3>, loadB<0-3>
 
-    104-107 : trackX<0-1>
     104-107 : trackA<0-1>, trackB<0-1>
 
-    108-125 ~ writeS, readAs, readBs, k, lda8, ldb8, tid, txa, txb, tid31, tid96, tid128, blkA, blkB, tidY
-    126-127 ~ tbid, seed
+    108-125 ~ writeS, k, txa, txb, tidY, ta, tb, loop
+    119-125 ~ readAs, readBs, tid, blkA, blkB, blkZ, seed
+    126-127 : Rand<0-1>
+
+    64-75   ~ ldc, ldcz, ci, xmad_c, clk_shf1, clk_shf2, tid_31, tid_96, tid_128
 
     64-75   : c<0-7>, d3, d2, d1, d0
     76-85   : C00y<0-1>, C04y<0-1>, C08y<0-1>, C12y<0-1>
-    86-107  ~ lfsr<0-2>, ldc, ldc1, ldc4, ldc60, writeCs, readCs, cx<00|64>, cy<00|04|08|12>, ci, xmad_c, alpha, beta, clk_shf1, clk_shf2
+    86-107  ~ lfsr<0-2>, ldc1, ldc4, ldc60, writeCs, readCs, cx<00|64>, cy<00|04|08|12>, alpha, beta
 
     108-125 ~ exp<0-3>, rand<0-3>, lfsr<0-2>_1, lfsr<0-2>_2, flags
 
 </REGISTER_MAPPING>
 
 --:-:1:-:1      S2R tid,  SR_TID.X;
---:-:2:-:1      S2R blkA, SR_CTAID.X;
---:-:3:-:1      S2R blkB, SR_CTAID.Y;
+--:-:2:-:1      S2R blkA, SR_CTAID.Y;
+--:-:3:-:1      S2R blkB, SR_CTAID.Z;
+--:-:4:-:1      S2R blkZ, SR_CTAID.X;
 
 <SCHEDULE_BLOCK>
 --:-:-:-:1      MOV k,    param_k;
+--:-:-:-:1      MOV loop, RZ;
 
 --:-:-:-:1      STS.128 [addr_zero], RZ;
 <CODE>
-        join('', map sprintf("--:-:-:-:1      MOV czero%02d, RZ;\n", $_), 0..31) .
-        join('', map sprintf("--:-:-:-:1      LDS.U.128 czero%02d, [addr_zero];\n", $_ * 4), 8..15);
+        join('', map sprintf("--:-:-:-:1      LDS.U.128 czero%02d, [addr_zero];\n", $_ * 4), 0..15);
 </CODE>
 
 // Grab a seed for this thread
@@ -106,45 +108,7 @@
 --:-:-:-:1  @P4 LDG.E.CS seed, [Rand];
 
 --:-:-:-:1      LOP.AND tid1,   tid,  1;
---:-:-:-:1      LOP.AND tid96,  tid,  96;
 --:-:-:-:1      LOP.AND tid128, tid,  128;
-
-<CODE>
-    our $vec;
-    return $vec ? q{
-
-01:-:-:-:1      ISETP.LT.AND P0, PT, tid, 128, PT;
-06:-:-:-:1      SEL blk, blkA, blkB, P0;
---:-:-:-:1  @P0 MOV lda,  param_lda;
---:-:-:-:1 @!P0 MOV lda,  param_ldb;
---:-:-:-:1      SHL lda8, lda, 4;
-
-// tidX = (tid & 15) << 3
-// tidY = (tid >> 4) & 7
---:-:-:-:1      LOP.AND tid31,  tid,  31;
---:-:-:-:1      LOP.AND tid15,  tid,  15;
---:-:-:-:1      SHL     tidX,   tid15, 3;
---:-:-:-:1      BFE.U32 tidY,   tid,  0x304; // 3 bits at position 4
-
-// trackX += (blkX*128 + lda*tidY + tidX) * 2
---:-:-:-:1      ISCADD   txa, blk, tidX, 7;
---:-:-:-:1      XMAD.LO2 ta, lda, tidY, txa;
---:-:-:-:1  @P0 LEA      trackX0.CC, ta, param_A[0],     0x1;
---:-:-:-:1  @P0 LEA.HI.X trackX1,    ta, param_A[1], RZ, 0x1;
---:-:-:-:1 @!P0 LEA      trackX0.CC, ta, param_B[0],     0x1;
---:-:-:-:1 @!P0 LEA.HI.X trackX1,    ta, param_B[1], RZ, 0x1;
-
---:-:-:-:1  @P0 ISETP.LT.AND P5, PT, txa, param_m, PT;
---:-:-:-:1 @!P0 ISETP.LT.AND P5, PT, txa, param_n, PT;
-
-// writeS = (128*tidY + tidX) * 4
-// writeS += 4x<128*8> if tid >= 128
---:-:-:-:1      ISCADD  writeS, tidY, tidX, 7;
---:-:-:-:1      SHL     writeS, writeS, 2;
---:-:-:-:1 @!P0 IADD    writeS, writeS, 4x<128*8>;
-
-    // Vec 4 and scalar loads
-    } : q{
 
 // tidX = (tid & 31) << 2
 // tidY = (tid >> 5) & 7
@@ -152,14 +116,17 @@
 --:-:-:-:1      SHL     tidX,   tid31, 2;
 --:-:-:-:1      BFE.U32 tidY,   tid,  0x305; // 3 bits at position 5
 
---:-:-:-:1      MOV lda,  param_lda;
---:-:-:-:1      MOV ldb,  param_ldb;
---:-:-:-:1      SHL lda8, lda, 4;
---:-:-:-:1      SHL ldb8, ldb, 4;
+--:-:-:-:1      MOV lda,  param_lda8;
+--:-:-:-:1      MOV ldb,  param_ldb8;
+--:-:-:-:1      SHR.U32 lda, lda, 4;
+--:-:-:-:1      SHR.U32 ldb, ldb, 4;
+--:-:-:-:1      MOV ldaz, param_ldaz;
+--:-:-:-:1      MOV ldbz, param_ldbz;
 
 // trackA += (blkA*128 + lda*tidY + tidX) * 2
 02:-:-:-:1      ISCADD   txa, blkA, tidX, 7;
 --:-:-:-:1      XMAD.LO2 ta,  lda,  tidY, txa;
+08:-:-:-:1      XMAD.LO2 ta,  ldaz, blkZ, ta;
 --:-:-:-:1      LEA      trackA0.CC, ta, param_A[0],     0x1;
 --:-:-:-:1      LEA.HI.X trackA1,    ta, param_A[1], RZ, 0x1;
 
@@ -168,6 +135,7 @@
 // trackB += (blkB*128 + ldb*tidY + tidX) * 2
 04:-:-:-:1      ISCADD   txb, blkB, tidX, 7;
 --:-:-:-:1      XMAD.LO2 tb,  ldb,  tidY, txb;
+08:-:-:-:1      XMAD.LO2 tb,  ldbz, blkZ, tb;
 --:-:-:-:1      LEA      trackB0.CC, tb, param_B[0],     0x1;
 --:-:-:-:1      LEA.HI.X trackB1,    tb, param_B[1], RZ, 0x1;
 
@@ -175,11 +143,8 @@
 
 // writeS = (128*tidY + tidX) * 4
 --:-:-:-:1      ISCADD  writeS, tidY, tidX, 7;
---:-:-:-:1      SHL     writeS, writeS, 2;
-    };
-</CODE>
+--:-:-:-:1      ISCADD  writeS, writeS, 4x<128*8*2>, 2;
 
---:-:-:-:1      LOP.XOR writeS, writeS, 4x<128*8*2>;
 
 // readAs  = (((tid & 0x70) >> 3) | (tid & 1)) << 4
 --:-:-:-:1      LOP.AND readAs, tid,    0x70;
@@ -204,9 +169,13 @@ REMAINDER:
 
 // doLoad = tidY < k && txa|txb < n|m
 --:-:-:-:1      ISETP.LT.AND P2, PT, tidY, k, P5;
+--:-:-:-:1      ISETP.LT.AND P3, PT, tidY, k, P6;
 
---:-:2:-:1  @P2 LDG.E.CI.128 loadX, [trackX];
---:-:3:-:2 @!P2 LDS.U.128 loadX, [addr_zero];
+--:-:2:-:1  @P2 LDG.E.CI.64 loadA, [trackA];
+--:-:3:-:1  @P3 LDG.E.CI.64 loadB, [trackB];
+
+--:-:5:-:1 @!P2 LDS.U.64 loadA, [addr_zero];
+--:-:6:-:1 @!P3 LDS.U.64 loadB, [addr_zero];
 
     // Vec 4 and scalar loads
     } : q{
@@ -260,30 +229,32 @@ REMAINDER:
 // bDoRemainder = k & 7 && k > 8
 --:-:-:-:0      LOP.AND.NZ P1, RZ, k, 7;
 
-06:-:-:-:4      F2F.F32.F16 loadX7, loadX3.H1;
---:-:-:-:4      F2F.F32.F16 loadX6, loadX3;
---:-:-:-:4      F2F.F32.F16 loadX5, loadX2.H1;
---:-:2:-:4      F2F.F32.F16 loadX4, loadX2;
+12:-:-:-:4      F2F.F32.F16 loadA3, loadA1.H1;
+--:-:-:-:0      IADD   trackA0.CC, trackA0, param_lda8;
+--:-:-:-:4      F2F.F32.F16 loadA2, loadA1.H0;
+--:-:-:-:4      F2F.F32.F16 loadA1, loadA0.H1;
+--:-:-:-:0      IADD.X trackA1, trackA1, RZ;
+--:-:2:-:2      F2F.F32.F16 loadA0, loadA0.H0;
 
---:-:-:-:0      IADD   trackX0.CC, trackX0, lda8;
+02:-:-:-:1      STS.128 [writeS + 4x<0*128>], loadA;
 
---:-:-:-:4      F2F.F32.F16 loadX3, loadX1.H1;
---:-:-:-:4      F2F.F32.F16 loadX2, loadX1;
---:-:-:-:4      F2F.F32.F16 loadX1, loadX0.H1;
+24:-:-:-:4      F2F.F32.F16 loadB3, loadB1.H1;
+--:-:-:-:0      IADD   trackB0.CC, trackB0, param_ldb8;
+--:-:-:-:4      F2F.F32.F16 loadB2, loadB1.H0;
+--:-:-:-:4      F2F.F32.F16 loadB1, loadB0.H1;
+--:-:-:-:0      IADD.X trackB1, trackB1, RZ;
+--:-:3:-:2      F2F.F32.F16 loadB0, loadB0.H0;
+
 --:-:-:-:0      ISETP.GT.AND P1, PT, k, 8, P1;
---:-:3:-:1      F2F.F32.F16 loadX0, loadX0;
 
---:-:-:-:0      IADD.X trackX1, trackX1, RZ;
-
-02:-:-:-:1      STS.128 [writeS + 4x<4>], loadX4;
-04:-:-:-:1      STS.128 [writeS + 4x<0>], loadX0;
+04:-:-:-:1      STS.128 [writeS + 4x<8*128>], loadB;
 
     // scalar loads
     } : q{
 --:-:-:-:0      ISETP.GT.AND P1, PT, k, 8, PT;
 
 02:-:-:-:4      F2F.F32.F16 loadA0, loadA0;
---:-:-:-:0      IADD   trackA0.CC, trackA0, lda8;
+--:-:-:-:0      IADD   trackA0.CC, trackA0, param_lda8;
 --:-:-:-:4      F2F.F32.F16 loadA1, loadA1;
 --:-:-:-:4      F2F.F32.F16 loadA2, loadA2;
 --:-:2:-:2      F2F.F32.F16 loadA3, loadA3;
@@ -293,7 +264,7 @@ REMAINDER:
 02:-:-:-:1      STS.128 [writeS + 4x<0*128>], loadA0;
 
 04:-:-:-:4      F2F.F32.F16 loadB0, loadB0;
---:-:-:-:0      IADD   trackB0.CC, trackB0, ldb8;
+--:-:-:-:0      IADD   trackB0.CC, trackB0, param_ldb8;
 --:-:-:-:4      F2F.F32.F16 loadB1, loadB1;
 --:-:-:-:4      F2F.F32.F16 loadB2, loadB2;
 --:-:3:-:2      F2F.F32.F16 loadB3, loadB3;
@@ -318,63 +289,56 @@ REMAINDER:
 
     our %insert =
     (
-        j0c8  => "--:-:-:-:1      ISETP.GE.AND P0, PT, k, $k_end, PT;\n",
+        j0c1  => "--:-:-:-:1      ISETP.GE.AND P3, PT, k, $k_end, P6;\n",
+        j0c3  => "--:-:-:-:1      ISETP.GE.AND P0, PT, k, $k_end, PT;\n",
 
         ($vec ? 
             (
-        j0c11 => "--:-:2:-:1  \@P2 LDG.E.CI.128 loadX, [trackX];\n",
+        j0c10 => "--:-:2:-:1  \@P2 LDG.E.CI.64 loadA0, [trackA];\n",
+        j0c13 => "--:-:3:-:1  \@P3 LDG.E.CI.64 loadB0, [trackB];\n",
 
-        j5c1  => "02:-:-:-:1  \@P2 F2F.F32.F16 loadX7, loadX3.H1;\n",
-        j5c5  => "--:-:-:-:1  \@P2 F2F.F32.F16 loadX6, loadX3;\n",
-        j5c9  => "--:-:-:-:1  \@P2 F2F.F32.F16 loadX5, loadX2.H1;\n",
-        j5c13 => "--:-:2:-:1  \@P2 F2F.F32.F16 loadX4, loadX2;\n",
+        j5c1  => "02:-:-:-:1  \@P2 F2F.F32.F16 loadA3, loadA1.H1;\n",
+        j5c5  => "--:-:-:-:1  \@P2 F2F.F32.F16 loadA2, loadA1;\n",
+        j5c9  => "--:-:-:-:1  \@P2 F2F.F32.F16 loadA1, loadA0.H1;\n",
+        j5c13 => "--:-:2:-:1  \@P2 F2F.F32.F16 loadA0, loadA0;\n",
 
-        j5c31 => "02:-:-:-:1  \@P0 STS.128 [writeS + 4x<4>], loadX4;\n",
-
-        j6c1  => "--:-:-:-:1  \@P2 F2F.F32.F16 loadX3, loadX1.H1;\n",
-        j6c5  => "--:-:-:-:1  \@P2 F2F.F32.F16 loadX2, loadX1;\n",
-        j6c9  => "--:-:-:-:1  \@P2 F2F.F32.F16 loadX1, loadX0.H1;\n",
-        j6c13 => "--:-:2:-:1  \@P2 F2F.F32.F16 loadX0, loadX0;\n",
-
-        j6c31 => "02:-:-:-:1  \@P0 STS.128 [writeS + 4x<0>], loadX0;\n",
-
-        j6c46 => "--:-:-:-:1  \@P2 IADD   trackX0.CC, trackX0, lda8;\n",
-        j6c54 => "--:-:-:-:1  \@P2 IADD.X trackX1,    trackX1, RZ;\n",
+        j6c1  => "04:-:-:-:1  \@P3 F2F.F32.F16 loadB3, loadB1.H1;\n",
+        j6c5  => "--:-:-:-:1  \@P3 F2F.F32.F16 loadB2, loadB1;\n",
+        j6c9  => "--:-:-:-:1  \@P3 F2F.F32.F16 loadB1, loadB0.H1;\n",
+        j6c13 => "--:-:3:-:1  \@P3 F2F.F32.F16 loadB0, loadB0;\n",
             ) : 
             (
-        j0c7  => "--:-:-:-:1      ISETP.GE.AND P3, PT, k, $k_end, P6;\n",
-
         j0c10 => "--:-:2:-:1  \@P2 LDG.E.CI.S16 loadA0, [trackA + 2x<0>];\n",
-        j0c29 => "--:-:2:-:1  \@P2 LDG.E.CI.S16 loadA1, [trackA + 2x<1>];\n",
-        j0c31 => "--:-:2:-:1  \@P2 LDG.E.CI.S16 loadA2, [trackA + 2x<2>];\n",
-        j0c33 => "--:-:2:-:1  \@P2 LDG.E.CI.S16 loadA3, [trackA + 2x<3>];\n",
+        j0c12 => "--:-:2:-:1  \@P2 LDG.E.CI.S16 loadA1, [trackA + 2x<1>];\n",
+        j0c14 => "--:-:2:-:1  \@P2 LDG.E.CI.S16 loadA2, [trackA + 2x<2>];\n",
+        j0c16 => "--:-:2:-:1  \@P2 LDG.E.CI.S16 loadA3, [trackA + 2x<3>];\n",
 
-        j0c35 => "--:-:4:-:1  \@P3 LDG.E.CI.S16 loadB0, [trackB + 2x<0>];\n",
-        j1c29 => "--:-:4:-:1  \@P3 LDG.E.CI.S16 loadB1, [trackB + 2x<1>];\n",
-        j1c31 => "--:-:4:-:1  \@P3 LDG.E.CI.S16 loadB2, [trackB + 2x<2>];\n",
-        j1c33 => "--:-:4:-:1  \@P3 LDG.E.CI.S16 loadB3, [trackB + 2x<3>];\n",
+        j0c29 => "--:-:3:-:1  \@P3 LDG.E.CI.S16 loadB0, [trackB + 2x<0>];\n",
+        j0c31 => "--:-:3:-:1  \@P3 LDG.E.CI.S16 loadB1, [trackB + 2x<1>];\n",
+        j0c33 => "--:-:3:-:1  \@P3 LDG.E.CI.S16 loadB2, [trackB + 2x<2>];\n",
+        j0c35 => "--:-:3:-:1  \@P3 LDG.E.CI.S16 loadB3, [trackB + 2x<3>];\n",
 
-        j5c8  => "02:-:-:-:1  \@P2 F2F.F32.F16 loadA0, loadA0;\n",
-        j5c12 => "--:-:-:-:1  \@P2 F2F.F32.F16 loadA1, loadA1;\n",
-        j5c16 => "--:-:-:-:1  \@P2 F2F.F32.F16 loadA2, loadA2;\n",
-        j5c20 => "--:-:2:-:1  \@P2 F2F.F32.F16 loadA3, loadA3;\n",
+        j5c1  => "02:-:-:-:1  \@P2 F2F.F32.F16 loadA0, loadA0;\n",
+        j5c5  => "--:-:-:-:1  \@P2 F2F.F32.F16 loadA1, loadA1;\n",
+        j5c9  => "--:-:-:-:1  \@P2 F2F.F32.F16 loadA2, loadA2;\n",
+        j5c13 => "--:-:2:-:1  \@P2 F2F.F32.F16 loadA3, loadA3;\n",
 
-        j6c8  => "08:-:-:-:1  \@P3 F2F.F32.F16 loadB0, loadB0;\n",
-        j6c12 => "--:-:-:-:1  \@P3 F2F.F32.F16 loadB1, loadB1;\n",
-        j6c16 => "--:-:-:-:1  \@P3 F2F.F32.F16 loadB2, loadB2;\n",
-        j6c20 => "--:-:4:-:1  \@P3 F2F.F32.F16 loadB3, loadB3;\n",
-
-        j5c39 => "02:-:-:-:1  \@P0 STS.128 [writeS + 4x<0*128>], loadA0;\n",
-
-        j5c46 => "--:-:-:-:1  \@P2 IADD   trackA0.CC, trackA0, lda8;\n",
-        j5c54 => "--:-:-:-:1  \@P2 IADD.X trackA1,    trackA1, RZ;\n",
-
-        j6c39 => "08:-:-:-:1  \@P0 STS.128 [writeS + 4x<8*128>], loadB0;\n",
-
-        j6c46 => "--:-:-:-:1  \@P3 IADD   trackB0.CC, trackB0, ldb8;\n",
-        j6c54 => "--:-:-:-:1  \@P3 IADD.X trackB1,    trackB1, RZ;\n",
+        j6c1  => "04:-:-:-:1  \@P3 F2F.F32.F16 loadB0, loadB0;\n",
+        j6c5  => "--:-:-:-:1  \@P3 F2F.F32.F16 loadB1, loadB1;\n",
+        j6c9  => "--:-:-:-:1  \@P3 F2F.F32.F16 loadB2, loadB2;\n",
+        j6c13 => "--:-:3:-:1  \@P3 F2F.F32.F16 loadB3, loadB3;\n",
             )
         ),
+
+        j5c31 => "02:-:-:-:1  \@P0 STS.128 [writeS + 4x<0*128>], loadA;\n",
+
+        j5c46 => "--:-:-:-:1  \@P2 IADD   trackA0.CC, trackA0, param_lda8;\n",
+        j5c54 => "--:-:-:-:1  \@P2 IADD.X trackA1,    trackA1, RZ;\n",
+
+        j6c31 => "04:-:-:-:1  \@P0 STS.128 [writeS + 4x<8*128>], loadB;\n",
+
+        j6c46 => "--:-:-:-:1  \@P3 IADD   trackB0.CC, trackB0, param_ldb8;\n",
+        j6c54 => "--:-:-:-:1  \@P3 IADD.X trackB1,    trackB1, RZ;\n",
 
         j6c63 => "--:-:-:-:5  \@P0 BAR.SYNC 0;\n" .
                  "--:-:-:-:1  \@P0 LOP.XOR readAs, readAs, 4x<128*8*2>;\n" .

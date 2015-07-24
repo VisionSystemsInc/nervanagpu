@@ -22,14 +22,18 @@ __global__ void __launch_bounds__(128) hgemm_nn_128x32
     const short* param_B,
     short*       param_C,
     int          param_lda,  
-    int          param_ldb,  
+    int          param_ldb8,  
     int          param_ldc,
     int          param_m,
     int          param_n,
     int          param_k,
     float        param_alpha,
     float        param_beta,
-    int          param_flags
+    int          param_flags,
+    int          param_ldaz,
+    int          param_ldbz,
+    int          param_ldcz,
+    int          param_batch_loops
 )
 {
     __shared__ float share[128*8*2 + 32*8*2 + 4];

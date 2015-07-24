@@ -74,6 +74,20 @@ LOOP:
 
 </CODE>
 
+--:-:-:-:1      IADD loop, loop, 1;
+--:-:-:-:1      IADD ta, ta, param_ldaz;
+--:-:-:-:1      IADD tb, tb, param_ldbz;
+--:-:-:-:3      MOV  k, param_k;
+--:-:-:-:1      ISETP.LT.AND P1, PT, loop, param_loops, PT;
+--:-:-:-:6      LEA      trackA0.CC, ta, param_A[0],     2;
+--:-:-:-:1      LEA.HI.X trackA1,    ta, param_A[1], RZ, 2;
+--:-:-:-:6      LEA      trackB0.CC, tb, param_B[0],     2;
+--:-:-:-:0      LEA.HI.X trackB1,    tb, param_B[1], RZ, 2;
+--:-:-:Y:5  @P1 BRA.U REMAINDER;
+
+--:-:1:-:1      S2R blockA, SR_CTAID.Y;
+--:-:2:-:1      S2R blockB, SR_CTAID.Z;
+--:-:3:-:1      S2R blockZ, SR_CTAID.X;
 <SCHEDULE_BLOCK>
 
 --:-:-:-:1      LOP.AND tid_31,  tid, 31;
@@ -94,17 +108,19 @@ LOOP:
 --:-:-:-:1      LOP.OR   readCs, readCs, cx00;
 --:-:-:-:1      SHL      readCs, readCs, 2;
 
-// cx += blkB*128;
---:-:-:-:1      ISCADD  cx00, blkB, cx00, 7;
+// cx += blockB*128;
+02:-:-:-:1      ISCADD  cx00, blockB, cx00, 7;
 --:-:-:-:1      IADD    cx64, cx00, 64;
 
-// cy = blkA*128 + (tid_96 >> 1)
+// cy = blockA*128 + (tid_96 >> 1)
 --:-:-:-:1      SHR.U32 cy00, tid_96, 1;
---:-:-:-:1      ISCADD  cy00, blkA, cy00, 7;
+01:-:-:-:1      ISCADD  cy00, blockA, cy00, 7;
 
-// C += (cy*ldc + cx) * 2;
---:-:-:-:1      MOV  ldc, param_ldc;
---:-:-:-:1      XMAD.LO ci, cy00, ldc, cx00, xmad_c;
+// C += (ldcz*blockZ + ldc*cy + cx00) * 4;
+--:-:-:-:1      MOV  ldc,  param_ldc;
+--:-:-:-:1      MOV  ldcz, param_ldcz;
+--:-:-:-:1      XMAD.LO  ci, ldc,  cy00,   cx00, xmad_c;
+04:-:-:-:1      XMAD.LO2 ci, ldcz, blockZ, ci;
 --:-:-:-:1      LEA      C00y0.CC, ci, param_C[0],     2;
 --:-:-:-:1      LEA.HI.X C00y1,    ci, param_C[1], RZ, 2;
 
