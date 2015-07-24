@@ -109,7 +109,7 @@ A[:] = ng.rand() # generate uniform random on device between 0 and 1
 A[:] = (A - ng.mean(A, axis=1)) / ng.sqrt(ng.var(A, axis=1) + eps)
 
 ```
-The last expression above is automatically collapsed into a single gpu kernel. There are two mean(A,axis=1) operations embedded in that expression (one in the numerator and one inside the variance operatotion).  One of them is automatically optimized away, leading to the most efficient kernel possible.
+The last expression above is automatically collapsed into a single gpu kernel. There are two mean(A,axis=1) operations embedded in that expression (one in the numerator and one inside the variance operation).  One of them is automatically optimized away, leading to the most efficient kernel possible.
 
 ## Building
 
