@@ -37,7 +37,7 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
 
     //better would be a vector<string>, but there is a bug in nvcc that prevents this
     // (bug report filed)
-    std::string names[40] = {
+    std::string names[32] = {
         "hgemm_nn_vec_128x128",
         "hgemm_nn_128x128",
         "hgemm_nt_vec_128x128",
@@ -69,15 +69,7 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
         "sgemm_tn_vec_128x32",
         "sgemm_tn_128x32",
         "sgemm_nn_32x128",
-        "sgemm_nn_vec_32x128",
-        "hsgemm_nn_128x128",
-        "hsgemm_nn_32x128",
-        "hsgemm_nn_vec_128x128",
-        "hsgemm_nn_vec_32x128",
-        "hsgemm_nt_128x128",
-        "hsgemm_nt_32x128",
-        "hsgemm_nt_vec_128x128",
-        "hsgemm_nt_vec_32x128"
+        "sgemm_nn_vec_32x128"
     };
 
     std::string base_path(base_path_cstr);
@@ -176,15 +168,17 @@ extern "C" bool nervana_sgemm(float *A, float *B, float *C,
 
     name += trans;
 
-    if ( (trans == "tn" && m % 4 == 0 && n % 4 == 0) ||
-         (trans == "nn" && k % 8 == 0 && n % 4 == 0) ||
+    if ( (trans == "tn" && m % 4 == 0  && n % 4 == 0) ||
+         (trans == "nn" && k % 16 == 0 && n % 4 == 0) ||
          (trans == "nt" && k % 16 == 0)) {
          name += "_vec";
     }
 
     int sizeA = 0;
     int sizeB = 0;
+    bool oldstyle = false;
     if (m < 128 && trans == "nn") { //use 32x128 kernels
+        oldstyle = true;
         sizeA = 32;
         sizeB = 128;
         gridA = m / sizeA + (m % sizeA != 0);
@@ -235,13 +229,32 @@ extern "C" bool nervana_sgemm(float *A, float *B, float *C,
     flags |= (stochastic_round << 0);
     flags |= (apply_relu << 1);
 
-    void *args[13] = {&rand_state, &A, &B, &C, &lda, &ldb, &ldc, &m, &n, &k, &alpha, &beta, &flags};
+    CUresult res;
+    if (oldstyle) {
+        void *args[13] = {&rand_state, &A, &B, &C, &lda, &ldb, &ldc, &m, &n, &k, &alpha, &beta, &flags};
 
-    CUresult res = cuLaunchKernel(nervana_kernels_[name],
-                                  gridA, gridB, 1,
-                                  threads, 1, 1,
-                                  0,
-                                  stream, args, NULL);
+        res = cuLaunchKernel(nervana_kernels_[name],
+                             gridA, gridB, 1,
+                             threads, 1, 1,
+                             0,
+                             stream, args, NULL);
+    } else {
+        if (a_t)
+            lda *= 8 * sizeof(float);
+
+        if (!b_t)
+            ldb *= 8 * sizeof(float);
+
+        int zero = 0;
+        void *args[17] = {&rand_state, &A, &B, &C, &lda, &ldb, &ldc, &m, &n, &k, &alpha, &beta, &flags,
+                          &zero, &zero, &zero, &zero};
+
+        res = cuLaunchKernel(nervana_kernels_[name],
+                             1, gridA, gridB,
+                             threads, 1, 1,
+                             0,
+                             stream, args, NULL);
+    }
 
     if (res != CUDA_SUCCESS) {
         std::cerr << "Error launching kernel " << name << " " << res << std::endl;
@@ -295,7 +308,7 @@ extern "C" bool nervana_hgemm(short *A, short *B, short *C,
 
     name += trans;
 
-    if ( (trans == "tn" && m % 8 == 0 && n % 8 == 0) ||
+    if ( (trans == "tn" && m % 8 == 0  && n % 8 == 0) ||
          (trans == "nn" && k % 16 == 0 && n % 8 == 0) ||
          (trans == "nt" && k % 16 == 0)) {
          name += "_vec";
@@ -303,7 +316,9 @@ extern "C" bool nervana_hgemm(short *A, short *B, short *C,
 
     int sizeA = 0;
     int sizeB = 0;
+    bool oldstyle = false;
     if (m < 128 && trans == "nn") { //use 32x128 kernels
+        oldstyle = true;
         sizeA = 32;
         sizeB = 128;
         gridA = m / sizeA + (m % sizeA != 0);
@@ -354,84 +369,33 @@ extern "C" bool nervana_hgemm(short *A, short *B, short *C,
     flags |= (stochastic_round << 0);
     flags |= (apply_relu << 1);
 
-    void *args[13] = {&rand_state, &A, &B, &C, &lda, &ldb, &ldc, &m, &n, &k, &alpha, &beta, &flags};
+    CUresult res;
 
-    CUresult res = cuLaunchKernel(nervana_kernels_[name],
-                                  gridA, gridB, 1,
-                                  threads, 1, 1,
-                                  0,
-                                  stream, args, NULL);
+    if (oldstyle) {
+        void *args[13] = {&rand_state, &A, &B, &C, &lda, &ldb, &ldc, &m, &n, &k, &alpha, &beta, &flags};
 
-    if (res != CUDA_SUCCESS) {
-        std::cerr << "Error launching kernel " << name << " " << res << std::endl;
-        return false;
+        res = cuLaunchKernel(nervana_kernels_[name],
+                             gridA, gridB, 1,
+                             threads, 1, 1,
+                             0,
+                             stream, args, NULL);
+    } else {
+        if (a_t)
+            lda *= 8 * sizeof(short);
+
+        if (!b_t)
+            ldb *= 8 * sizeof(short);
+
+        int zero = 0;
+        void *args[17] = {&rand_state, &A, &B, &C, &lda, &ldb, &ldc, &m, &n, &k, &alpha, &beta, &flags,
+                          &zero, &zero, &zero, &zero};
+
+        res = cuLaunchKernel(nervana_kernels_[name],
+                             1, gridA, gridB,
+                             threads, 1, 1,
+                             0,
+                             stream, args, NULL);
     }
-
-    return true;
-}
-
-extern "C" bool nervana_hsgemm(short *A, float *B, short *C,
-                               bool a_t, bool b_t,
-                               int m, int n, int k,
-                               int lda, int ldb, int ldc,
-                               float alpha, float beta,
-                               unsigned int *rand_state,
-                               bool stochastic_round, bool apply_relu,
-                               CUstream stream
-                              )
-{
-    if (a_t) {
-        std::cerr << "The TN variant is not implemented for hsgemm" << std::endl;
-        return false;
-    }
-
-    int gridA, gridB, threads;
-
-    std::string name = "hsgemm_";
-
-    std::string trans;
-    trans += a_t ? 't' : 'n';
-    trans += b_t ? 't' : 'n';
-
-    name += trans;
-
-    if ( (trans == "nn" && k % 16 == 0 && n % 8 == 0) ||
-         (trans == "nt" && k % 16 == 0)) {
-         name += "_vec";
-    }
-
-    int sizeA = 0;
-    int sizeB = 0;
-    if (m < 128 && trans == "nn") { //use 32x128 kernels
-        sizeA = 32;
-        sizeB = 128;
-        gridA = m / sizeA + (m % sizeA != 0);
-        threads = 128;
-    }
-    else {
-        sizeA = 128;
-        sizeB = 128;
-        gridA = m / sizeA + (m % sizeA != 0);
-
-        threads = 256;
-    }
-
-    gridB = n / sizeB + (n % sizeB != 0);
-    std::stringstream ss;
-    ss << "_" << sizeA << "x" << sizeB;
-    name += ss.str();
-
-    int flags = 0;
-    flags |= (stochastic_round << 0);
-    flags |= (apply_relu << 1);
-
-    void *args[13] = {&rand_state, &A, &B, &C, &lda, &ldb, &ldc, &m, &n, &k, &alpha, &beta, &flags};
-
-    CUresult res = cuLaunchKernel(nervana_kernels_[name],
-                                  gridA, gridB, 1,
-                                  threads, 1, 1,
-                                  0,
-                                  stream, args, NULL);
 
     if (res != CUDA_SUCCESS) {
         std::cerr << "Error launching kernel " << name << " " << res << std::endl;
