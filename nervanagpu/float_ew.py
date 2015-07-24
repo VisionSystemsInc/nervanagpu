@@ -753,6 +753,7 @@ def _get_compound_kernel(type_args):
 
                 # Subsequent times we see a tensor just initialize inits and loads
                 elif (arg_id, stage) not in array_ids:
+                    array_ids.add((arg_id, stage))
                     ew_in = _ew_strings["in%d" % take_axis]
                     loads = "loads%d" % stage
                     template_vals["inits"].append(ew_in["inits"].format(*fmt))
