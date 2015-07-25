@@ -1077,22 +1077,13 @@ def call_compound_kernel(rand_state, *args):
                     indx = array_ids[arg] = arg_cnt
                 arg_cnt += 1
 
-                # special case of reducing and outputing along axis=0
-                if arg is out and axis == 0 and shape[0] == 1:
-                    strides[0] = 1
-                    strides[1] = 0
-                else:
-                    # support broadcast of a row vector
-                    if shape[0] == 1: strides[0] = 0
+                # support broadcast
+                if shape[0] == 1:
+                    strides[1-axis] = 0
+                if shape[1] == 1:
+                    strides[axis]   = 0
 
-                    # If we're traversing down the columns and this tensor has only one column,
-                    # we preserve the col_stride to allow us to jump to the next row.
-                    # This is probably a hack so maybe investigate this further.
-                    if axis == 1:
-                        # For the common case of traversing down the rows, zero the stride to
-                        # support broadcast of column vector.
-                        if shape[1] == 1: strides[1] = 0
-
+                # fancy indexing/take
                 if arg.take_array:
                     kernel_args.extend((arg.gpudata, strides[0], strides[1], arg.take_array[0].gpudata))
                 else:
@@ -1221,12 +1212,9 @@ def call_compound_kernel(rand_state, *args):
         else:
             raise TypeError("args must be instance of GPUTensor, int, float, or dict (for operators)")
 
-    # print "\n".join(str(s) for s in args)
-    # print "\n"
-    # print "\n".join(str(s) for s in kernel_args)
-    # print "\n"
-    # print "\n".join(str(s) for s in type_args)
-    # print "\n"
+    # for s in argsprint:   print s
+    # for s in kernel_args: print s
+    # for s in type_args:   print s
 
     # get or create the kernel in the memoize cache
     kernel = _get_compound_kernel(tuple(type_args))
