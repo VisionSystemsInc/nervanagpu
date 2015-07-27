@@ -29,10 +29,14 @@ __global__ void __launch_bounds__(128) sgemm_nt_32x128
     int          param_k,
     float        param_alpha,
     float        param_beta,
-    int          param_flags
+    int          param_flags,
+    int          param_ldaz,
+    int          param_ldbz,
+    int          param_ldcz,
+    int          param_batch_loops
 )
 {
-    __shared__ float share[128*8*2 + 32*8*2 + 4];
+    __shared__ float share[(128*16 + 32)*2 + (32*16 + 32)*2 + 4];
 
     int tid = threadIdx.x;
 

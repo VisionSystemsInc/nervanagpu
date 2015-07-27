@@ -871,12 +871,13 @@ class NervanaGPU(object):
         op = opA + opB
         assert op != "tt"
 
+        short = min(m,n)
         if batch_loops > 1:
             size = 128
         elif size is None:
-            if n % 128 == 0:
+            if short % 128 == 0:
                 size = 128
-            elif n > 32:
+            elif short > 32:
                 size = 64
             else:
                 size = 32
@@ -897,10 +898,12 @@ class NervanaGPU(object):
         else:
             raise TypeError("Only floating point dot currently supported.")
 
-        gridA   = m // 128  + (m % 128 != 0)
-        gridB   = n // size + (n % size != 0)
+        sizeA, sizeB = (size,128) if m < n else (128,size)
+
+        gridA   = m // sizeA + (m % sizeA != 0)
+        gridB   = n // sizeB + (n % sizeB != 0)
         threads = 256 if size == 128 else 128
-        size    = "128x%d" % size
+        size    = "%dx%d" % (sizeA,sizeB)
 
         kernel = _get_gemm_kernel(self.cubin_path, clss, op, size)
         params = [
@@ -978,24 +981,27 @@ class NervanaGPU(object):
         assert n == C.shape[1]
         assert k == B.shape[0]
 
-        gridA = m // 128 + (m % 128 != 0)
+        short = min(m,n)
 
-        if op == "nt":
+        if   short == m and op == "tn":
             size = 128
+        # elif short == n and op == "nt":
+        #     size = 128
 
         # Some basic tile size selection.
         # Your best bet is to benchmark your code with all 3 sizes
         # and manually fine tune the selection for each layer.
         if size is None:
-            if n < 384-16:
-                n128 = n % 128
-                if 0 < n128 < 112:
-                    if 48 < n128 <= 64:
-                        n64  = n // 64
-                        n64 *= gridA // _get_sm_count()
+            if short < 384-16:
+                short128 = short % 128
+                if 0 < short128 < 112:
+                    if 48 < short128 <= 64:
+                        short64  = short // 64
+                        wide     = max(m,n)
+                        short64 *= (wide // 128 + (wide % 128 != 0)) // _get_sm_count()
                         # nn_64 is only faster than nn_32 when occupancy is
                         # more than 1 warp per scheduler.
-                        if n64 > 1 or op == "tn":
+                        if short64 > 1 or op == "tn":
                             size = 64
                         else:
                             size = 32
@@ -1023,9 +1029,12 @@ class NervanaGPU(object):
         else:
             raise TypeError("Only floating point dot currently supported.")
 
-        gridB   = n // size + (n % size != 0)
+        sizeA, sizeB = (size,128) if m <= n else (128,size)
+
+        gridA   = m // sizeA + (m % sizeA != 0)
+        gridB   = n // sizeB + (n % sizeB != 0)
         threads = 256 if size == 128 else 128
-        size    = "128x%d" % size
+        size    = "%dx%d" % (sizeA,sizeB)
 
         flags = 0
         if C.rounding: flags |= 1 | (C.rounding << 16)
