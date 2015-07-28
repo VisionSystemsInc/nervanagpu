@@ -877,7 +877,7 @@ class NervanaGPU(object):
         elif size is None:
             if short % 128 == 0:
                 size = 128
-            elif short > 32:
+            elif short > 32 and short == n: #temp
                 size = 64
             else:
                 size = 32
@@ -945,7 +945,7 @@ class NervanaGPU(object):
 
         relu: if true applied before output (and prior to beta addition)
 
-        size: one of 32, 64, 128.  Sometimes the fastest tiling isn't chosen for you.
+        size: one of 32x128, 128x32, 64x128, 128x64, 128x128.  Sometimes the fastest tiling isn't chosen for you.
         """
         assert A.dtype.type == B.dtype.type == C.dtype.type
 
@@ -983,11 +983,6 @@ class NervanaGPU(object):
 
         short = min(m,n)
 
-        if   short == m and op == "tn":
-            size = 128
-        # elif short == n and op == "nt":
-        #     size = 128
-
         # Some basic tile size selection.
         # Your best bet is to benchmark your code with all 3 sizes
         # and manually fine tune the selection for each layer.
@@ -1013,6 +1008,27 @@ class NervanaGPU(object):
             else:
                 size = 128
 
+            if n >= m:
+                if op == "nt": 
+                    size = 128
+                sizeA, sizeB = (128,size)
+            else:
+                if op == "tn":
+                    size = 128
+                # temp till I can write these kernels
+                elif size == 64:
+                    size = 32 
+                sizeA, sizeB = (size,128)
+
+            size = "%dx%d" % (sizeA,sizeB)
+
+        else:
+            sizeA, sizeB = (int(s) for s in size.split('x'))
+
+        gridA   = m // sizeA + (m % sizeA != 0)
+        gridB   = n // sizeB + (n % sizeB != 0)
+        threads = 256 if size == "128x128" else 128
+
         # nt and nn are more efficient with k%16==0
         if C.dtype.type is np.float16:
             clss = "hgemm"
@@ -1028,13 +1044,6 @@ class NervanaGPU(object):
                 op += "_vec"
         else:
             raise TypeError("Only floating point dot currently supported.")
-
-        sizeA, sizeB = (size,128) if m <= n else (128,size)
-
-        gridA   = m // sizeA + (m % sizeA != 0)
-        gridB   = n // sizeB + (n % sizeB != 0)
-        threads = 256 if size == 128 else 128
-        size    = "%dx%d" % (sizeA,sizeB)
 
         flags = 0
         if C.rounding: flags |= 1 | (C.rounding << 16)
