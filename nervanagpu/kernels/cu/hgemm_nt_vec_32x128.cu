@@ -15,12 +15,12 @@
  */
 
 extern "C"
-__global__ void __launch_bounds__(128) sgemm_nt_32x128
+__global__ void __launch_bounds__(128) hgemm_nt_vec_32x128
 (
-    short*       param_Rand,
-    const float* param_A,
-    const float* param_B,
-    float*       param_C,
+    int*         param_Rand,
+    const short* param_A,
+    const short* param_B,
+    short*       param_C,
     int          param_lda,  
     int          param_ldb,  
     int          param_ldc,
