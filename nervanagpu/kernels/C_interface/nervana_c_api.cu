@@ -161,7 +161,7 @@ std::tuple<int, int, int> get_grid_dimensions(int grid, int m, int n, int sm_cou
                     int sh64 = sh / 64;
                     int wide = max(m, n);
                     sh64 *= (wide / 128 + (wide % 128 != 0)) / sm_count;
-                    if (sh64 > 1 || trans == "tn") {
+                    if (sh64 > 1) {
                         size = 64;
                     }
                     else {
@@ -179,7 +179,7 @@ std::tuple<int, int, int> get_grid_dimensions(int grid, int m, int n, int sm_cou
             size = 128;
         }
 
-        if (n >= m) {
+        if (m >= n) {
             if (trans == "nt") {
                 size = 128;
             }
@@ -243,15 +243,17 @@ extern "C" bool nervana_sgemm(float *A, float *B, float *C,
 
     name += trans;
 
-    if ( (trans == "tn" && m % 4 == 0  && n % 4 == 0) ||
-         (trans == "nn" && k % 16 == 0 && n % 4 == 0) ||
-         (trans == "nt" && k % 16 == 0)) {
-         name += "_vec";
-    }
-
     int sizeA, sizeB, threads;
 
     std::tie(sizeA, sizeB, threads) = get_grid_dimensions(grid, m, n, sm_count, trans);
+
+    int k_vec = (sizeA == 32 || sizeB == 32) ? 4 : 16;
+
+    if ( (trans == "tn" && m % 4 == 0  && n % 4 == 0) ||
+         (trans == "nn" && k % k_vec == 0 && n % 4 == 0) ||
+         (trans == "nt" && k % k_vec == 0)) {
+         name += "_vec";
+    }
 
     int gridA = m / sizeA + (m % sizeA != 0);
     int gridB = n / sizeB + (n % sizeB != 0);
@@ -331,15 +333,17 @@ extern "C" bool nervana_hgemm(short *A, short *B, short *C,
 
     name += trans;
 
-    if ( (trans == "tn" && m % 8 == 0  && n % 8 == 0) ||
-         (trans == "nn" && k % 16 == 0 && n % 8 == 0) ||
-         (trans == "nt" && k % 16 == 0)) {
-         name += "_vec";
-    }
-
     int sizeA, sizeB, threads;
 
     std::tie(sizeA, sizeB, threads) = get_grid_dimensions(grid, m, n, sm_count, trans);
+
+    int k_vec = (sizeA == 32 || sizeB == 32) ? 4 : 16;
+
+    if ( (trans == "tn" && m % 8 == 0 && n % 8 == 0) ||
+         (trans == "nn" && k % k_vec == 0 && n % 8 == 0) ||
+         (trans == "nt" && k % k_vec == 0)) {
+         name += "_vec";
+    }
 
     int gridA = m / sizeA + (m % sizeA != 0);
     int gridB = n / sizeB + (n % sizeB != 0);
