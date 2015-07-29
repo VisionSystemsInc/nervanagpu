@@ -339,8 +339,8 @@ extern "C" bool nervana_hgemm(short *A, short *B, short *C,
 
     int k_vec = (sizeA == 32 || sizeB == 32) ? 4 : 16;
 
-    if ( (trans == "tn" && m % 8 == 0 && n % 8 == 0) ||
-         (trans == "nn" && k % k_vec == 0 && n % 8 == 0) ||
+    if ( (trans == "tn" && m % 4 == 0 && n % 4 == 0) ||
+         (trans == "nn" && k % k_vec == 0 && n % 4 == 0) ||
          (trans == "nt" && k % k_vec == 0)) {
          name += "_vec";
     }
