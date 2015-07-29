@@ -20,7 +20,7 @@ X = 100   # Batch Size
 N = 32   # Minibatch Size
 C = 3072  # Input  Features
 K = 3072  # Output Features
-Nin = False
+Nin = True
 
 dimW = (K,C)
 if Nin:
@@ -53,7 +53,7 @@ if Nin:
     ng.batched_dot(devE,   devI.T, devU, repeat=repeat, size=size) # update
 else:
     ng.batched_dot(devI,   devW.T, devO, repeat=repeat, size=size) # fprop
-    # ng.batched_dot(devE,   devW,   devB, repeat=repeat, size=size) # bprop
+    ng.batched_dot(devE,   devW,   devB, repeat=repeat, size=size) # bprop
     ng.batched_dot(devE.T, devI,   devU, repeat=repeat, size=size) # update
 
 if cpu:
@@ -74,10 +74,10 @@ if cpu:
             cpuU   += np.dot(cpuE[i].T, cpuI[i]) # update
 
     diffO = abs(devO.get() - cpuO)
-    #diffB = abs(devB.get() - cpuB)
+    diffB = abs(devB.get() - cpuB)
     diffU = abs(devU.get() - cpuU)
     print diffO.max()
-    #print diffB.max()
+    print diffB.max()
     print diffU.max()
 
 exit()
