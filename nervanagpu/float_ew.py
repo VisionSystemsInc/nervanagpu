@@ -1223,7 +1223,7 @@ def call_compound_kernel(rand_state, *args):
 
     shared = threads * 4 if reduction and threads > 32 else 0
 
-    if out.backend.bench:
+    if out.backend.bench > 1:
         repeat = out.backend.bench
         start, end = ng._get_events()
         start.record(out.backend.stream)
@@ -1237,7 +1237,7 @@ def call_compound_kernel(rand_state, *args):
         #for a in kernel_args: print a
         kernel.prepared_async_call((max_shape[1-axis],1,1), (threads,1,1), out.backend.stream, *kernel_args, shared_size=shared)
 
-    if out.backend.bench:
+    if out.backend.bench > 1:
         end.record(out.backend.stream)
         end.synchronize()
         msecs = end.time_since(start) / repeat

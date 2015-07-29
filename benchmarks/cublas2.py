@@ -61,10 +61,10 @@ ng = NervanaGPU(stochastic_round=False, bench=True)
 
 for dtype in (np.float16,np.float32):
     
-    for K, C, N in ((3072,3072*1,32),(3072,3072*1,64),(3072,3072*1,96),(3072,3072*1,128),
-                    (3072,3072*2,32),(3072,3072*2,64),(3072,3072*2,96),(3072,3072*2,128),
-                    (3072,3072*3,32),(3072,3072*3,64),(3072,3072*3,96),(3072,3072*3,128),
-                    (3072,3072*4,32),(3072,3072*4,64),(3072,3072*4,96),(3072,3072*4,128),): 
+    for K, C, N in ((3072,3072*1,32),(3072,3072*1,64),(3072,3072*1,96),(3072,3072*1,128),):
+                    #(3072,3072*2,32),(3072,3072*2,64),(3072,3072*2,96),(3072,3072*2,128),
+                    #(3072,3072*3,32),(3072,3072*3,64),(3072,3072*3,96),(3072,3072*3,128),
+                    #(3072,3072*4,32),(3072,3072*4,64),(3072,3072*4,96),(3072,3072*4,128),): 
                     #(3072,3072,32+128*0),(3072,3072,64+128*0),(3072,3072,96+128*0),(3072,3072,128+128*0),
                     #(3072,3072,32+128*1),(3072,3072,64+128*1),(3072,3072,96+128*1),(3072,3072,128+128*1),
                     #(3072,3072,32+128*2),(3072,3072,64+128*2),(3072,3072,96+128*2),(3072,3072,128+128*2),
@@ -105,11 +105,11 @@ for dtype in (np.float16,np.float32):
             glops64 = 0
             if op == "tn" and dtype is np.float16:
                 # Experimental 128x16 gemm kernel
-                glops16 = ng.dot(devA1, devB1, devC1, repeat=repeat, size=16)
+                glops16 = ng.dot(devA1, devB1, devC1, repeat=repeat, size="128x16")
             if op != 'nt':
-                glops32 = ng.dot(devA1, devB1, devC1, repeat=repeat, size=32)
-                glops64 = ng.dot(devA1, devB1, devC1, repeat=repeat, size=64)
-            glops128 = ng.dot(devA1, devB1, devC1, repeat=repeat, size=128)
+                glops32 = ng.dot(devA1, devB1, devC1, repeat=repeat, size="128x32")
+                glops64 = ng.dot(devA1, devB1, devC1, repeat=repeat, size="128x64")
+            glops128 = ng.dot(devA1, devB1, devC1, repeat=repeat, size="128x128")
 
             glops = max(glops16, glops32, glops64, glops128)
 

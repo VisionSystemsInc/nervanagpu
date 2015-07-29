@@ -85,6 +85,11 @@ big_2    = (32,64,128,1536-80,1536-64,1536,1536+64,1536+80,3072,4096)
 # devC2s = ng.empty(sharedDim, dtype=np.float32)
 # devPs  = ng.empty((sharedDim[0],1), dtype=np.float32)
 
+implemented = {
+    "nn" : set(("128x32","32x128","128x64","128x128")),
+    "tn" : set(("128x32","128x64","128x128")),
+    "nt" : set(("32x128","128x128")),
+}
 
 for dtype in (np.float16, np.float32, ): # np.float16
     
@@ -102,12 +107,11 @@ for dtype in (np.float16, np.float32, ): # np.float16
             for C in (size):
                 print("C:", C)
                 for N in (size):
-
                     for alpha, beta in ((1.0,0.0), (0.5,0.5)):
 
                         for op,  dimA,  dimB,  dimC in (
                           ("nn", (K,C), (C,N), (K,N) ),  # fprop
-                          #("tn", (K,C), (K,N), (C,N) ),  # bprop
+                          ("tn", (K,C), (K,N), (C,N) ),  # bprop
                           ("nt", (K,N), (C,N), (K,C) )): # update
 
                             try: 
@@ -144,10 +148,10 @@ for dtype in (np.float16, np.float32, ): # np.float16
                                 if op[0] == 't': devA1, devA2 = devA1.T, devA2.T
                                 if op[1] == 't': devB1, devB2 = devB1.T, devB2.T
 
-                                for tile in ("32x128",):
-
+                                for tile in ("128x32","32x128",):
+                                    if tile not in implemented[op]:
+                                        continue
                                     try: 
-
                                         ng.dot(devA1, devB1, devC1, alpha=alpha, beta=beta, size=tile)
                                         #context.synchronize()
 

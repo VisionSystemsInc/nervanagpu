@@ -36,7 +36,7 @@ __global__ void __launch_bounds__(128) hgemm_tn_128x32
     int          param_batch_loops
 )
 {
-    __shared__ float share[128*8*2 + 32*8*2 + 4];
+    __shared__ float share[128*16*2 + 32*16*2 + 4];
 
     int tid = threadIdx.x;
 
