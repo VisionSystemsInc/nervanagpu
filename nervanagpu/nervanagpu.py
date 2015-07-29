@@ -882,28 +882,27 @@ class NervanaGPU(object):
             else:
                 size = 32
 
-        # nt and nn are more efficient with k%16==0
-        if C.dtype.type is np.float16:
-            clss = "hgemm"
-            if  op == "tn" and m % 8  == 0 and n % 8 == 0 or \
-                op == "nn" and k % 16 == 0 and n % 8 == 0 or \
-                op == "nt" and k % 16 == 0:
-                op += "_vec"
-        elif C.dtype.type is np.float32:
-            clss = "sgemm"
-            if  op == "tn" and m % 4  == 0 and n % 4 == 0 or \
-                op == "nn" and k % 16 == 0 and n % 4 == 0 or \
-                op == "nt" and k % 16 == 0:
-                op += "_vec"
-        else:
-            raise TypeError("Only floating point dot currently supported.")
-
         sizeA, sizeB = (size,128) if m < n else (128,size)
 
         gridA   = m // sizeA + (m % sizeA != 0)
         gridB   = n // sizeB + (n % sizeB != 0)
         threads = 256 if size == 128 else 128
         size    = "%dx%d" % (sizeA,sizeB)
+
+        k_vec = 4 if sizeA == 32 or sizeB == 32 else 16
+
+        if  op == "tn" and m % 4 == 0 and n % 4 == 0 or \
+            op == "nn" and k % k_vec == 0 and n % 4 == 0 or \
+            op == "nt" and k % k_vec == 0:
+            op += "_vec"
+
+        # nt and nn are more efficient with k%16==0
+        if C.dtype.type is np.float16:
+            clss = "hgemm"
+        elif C.dtype.type is np.float32:
+            clss = "sgemm"
+        else:
+            raise TypeError("Only floating point dot currently supported.")
 
         kernel = _get_gemm_kernel(self.cubin_path, clss, op, size)
         params = [
@@ -981,22 +980,26 @@ class NervanaGPU(object):
         assert n == C.shape[1]
         assert k == B.shape[0]
 
-        short = min(m,n)
-
         # Some basic tile size selection.
         # Your best bet is to benchmark your code with all 3 sizes
         # and manually fine tune the selection for each layer.
+        # TODO: Perhaps I'll add an autotuning mode.
         if size is None:
+            # find the shorter side
+            short = min(m,n)
+            # anything bigger than this just use 128
             if short < 384-16:
+                # compute remainder of 128
                 short128 = short % 128
+                # if remainder is more than 112 just use 128
                 if 0 < short128 < 112:
+                    # to figure out when to use 64 over 32 we need to calc occupancy at 64
                     if 48 < short128 <= 64:
-                        short64  = short // 64
-                        wide     = max(m,n)
-                        short64 *= (wide // 128 + (wide % 128 != 0)) // _get_sm_count()
-                        # nn_64 is only faster than nn_32 when occupancy is
-                        # more than 1 warp per scheduler.
-                        if short64 > 1 or op == "tn":
+                        occupancy64  = short // 64
+                        wide         = max(m,n)
+                        occupancy64 *= (wide // 128 + (wide % 128 != 0)) // _get_sm_count()
+                        # 64 is only faster than 32 when occupancy is more than 1 warp per scheduler.
+                        if occupancy64 > 1:
                             size = 64
                         else:
                             size = 32
@@ -1008,14 +1011,15 @@ class NervanaGPU(object):
             else:
                 size = 128
 
-            if n >= m:
+            # match the kernel to the optimal short size but avoid not implemented kernels
+            if m >= n:
                 if op == "nt": 
                     size = 128
                 sizeA, sizeB = (128,size)
             else:
                 if op == "tn":
                     size = 128
-                # temp till I can write these kernels
+                # temp till I can write these kernels (coming soon)
                 elif size == 64:
                     size = 32 
                 sizeA, sizeB = (size,128)
@@ -1029,19 +1033,18 @@ class NervanaGPU(object):
         gridB   = n // sizeB + (n % sizeB != 0)
         threads = 256 if size == "128x128" else 128
 
+        k_vec = 4 if sizeA == 32 or sizeB == 32 else 16
+
+        if  op == "tn" and m % 4 == 0 and n % 4 == 0 or \
+            op == "nn" and k % k_vec == 0 and n % 4 == 0 or \
+            op == "nt" and k % k_vec == 0:
+            op += "_vec"
+
         # nt and nn are more efficient with k%16==0
-        if C.dtype.type is np.float16:
+        if   C.dtype.type is np.float16:
             clss = "hgemm"
-            if  op == "tn" and m % 8  == 0 and n % 8 == 0 or \
-                op == "nn" and k % 16 == 0 and n % 8 == 0 or \
-                op == "nt" and k % 16 == 0:
-                op += "_vec"
         elif C.dtype.type is np.float32:
             clss = "sgemm"
-            if  op == "tn" and m % 4  == 0 and n % 4 == 0 or \
-                op == "nn" and k % 16 == 0 and n % 4 == 0 or \
-                op == "nt" and k % 16 == 0:
-                op += "_vec"
         else:
             raise TypeError("Only floating point dot currently supported.")
 
