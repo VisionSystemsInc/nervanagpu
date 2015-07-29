@@ -38,7 +38,7 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
 
     //better would be a vector<string>, but there is a bug in nvcc that prevents this
     // (bug report filed)
-    std::string names[32] = {
+    std::string names[36] = {
         "hgemm_nn_vec_128x128",
         "hgemm_nn_128x128",
         "hgemm_nt_vec_128x128",
@@ -55,6 +55,8 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
         "hgemm_tn_128x32",
         "hgemm_nn_32x128",
         "hgemm_nn_vec_32x128",
+        "hgemm_nt_32x128",
+        "hgemm_nt_vec_32x128",
         "sgemm_nn_vec_128x128",
         "sgemm_nn_128x128",
         "sgemm_nt_vec_128x128",
@@ -70,7 +72,9 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
         "sgemm_tn_vec_128x32",
         "sgemm_tn_128x32",
         "sgemm_nn_32x128",
-        "sgemm_nn_vec_32x128"
+        "sgemm_nn_vec_32x128",
+        "sgemm_nt_32x128",
+        "sgemm_nt_vec_32x128"
     };
 
     std::string base_path(base_path_cstr);
