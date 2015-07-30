@@ -25,7 +25,8 @@
 #include "nervana_c_api.h"
 
 void test_hgemm(short* d_a, short* d_b, short* d_c, bool a_t, bool b_t, int size) {
-    nervana_hgemm(d_a, d_b, d_c, a_t, b_t, size, size, size, size, size, size, 1.0, 0.0, NULL, false, false, 0);
+    if (!nervana_hgemm(d_a, d_b, d_c, a_t, b_t, size, size, size, size, size, size, 1.0, 0.0, NULL, false, false, 0))
+        return;
 
     short* h_c = (short *)malloc(sizeof(short) * size * size);
     cudaMemcpy(h_c, d_c, sizeof(short) * size * size, cudaMemcpyDeviceToHost);
@@ -39,7 +40,8 @@ void test_hgemm(short* d_a, short* d_b, short* d_c, bool a_t, bool b_t, int size
 }
 
 void test_sgemm(float* d_a, float* d_b, float* d_c, bool a_t, bool b_t, int size) {
-    nervana_sgemm(d_a, d_b, d_c, a_t, b_t, size, size, size, size, size, size, 1.0, 0.0, NULL, false, false, 0);
+    if (!nervana_sgemm(d_a, d_b, d_c, a_t, b_t, size, size, size, size, size, size, 1.0, 0.0, NULL, false, false, 0))
+        return;
 
     float* h_c = (float *)malloc(sizeof(float) * size * size);
     cudaMemcpy(h_c, d_c, sizeof(float) * size * size, cudaMemcpyDeviceToHost);
@@ -59,7 +61,10 @@ int main() {
         exit(1);
     }
 
-    nervana_loadKernels("/tools/nervana/cubin/");
+    if (!nervana_loadKernels("../cubin/")) {
+        std::cerr << "Couldn't load all kernels" << std::endl;
+        exit(1);
+    }
 
     //make sure we load and run all different blocking and vector variants
     std::vector<int> sizes {257, 256, 255, 129, 128, 127, 65, 64, 17, 16, 15};
