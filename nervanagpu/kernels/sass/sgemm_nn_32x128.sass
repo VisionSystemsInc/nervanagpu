@@ -295,6 +295,8 @@ REMAINDER:
     };
 </CODE>
 
+--:-:-:-:1      ISETP.GE.AND P2, PT, k, 32, P5;
+--:-:-:-:1      ISETP.GE.AND P3, PT, k, 32, P5;
 --:-:-:-:1      ISETP.GE.AND P5, PT, k, 32, P5;
 --:-:-:-:1      ISETP.GE.AND P6, PT, k, 32, P6;
 
@@ -338,21 +340,21 @@ REMAINDER:
 <CODE>
     our $vec;
     return $vec ? q{
---:-:3:-:1  @P5 LDG.E.CI.128 load0B, [track0B];
---:-:4:-:1  @P5 LDG.E.CI.128 load1B, [track1B];
+--:-:3:-:1  @P2 LDG.E.CI.128 load0B, [track0B];
+--:-:4:-:1  @P3 LDG.E.CI.128 load1B, [track1B];
 --:-:5:-:1  @P5 LDG.E.CI.128 load2B, [track2B];
 --:-:5:-:1  @P5 LDG.E.CI.128 load3B, [track3B];
 --:-:6:-:1  @P6 LDG.E.CI.128 loadA,  [trackA];
     } : q{
---:-:3:-:1  @P5 LDG.E.CI load0B0, [track0B + 4x<0>];
---:-:3:-:1  @P5 LDG.E.CI load0B1, [track0B + 4x<1>];
---:-:3:-:1  @P5 LDG.E.CI load0B2, [track0B + 4x<2>];
---:-:3:-:1  @P5 LDG.E.CI load0B3, [track0B + 4x<3>];
+--:-:3:-:1  @P2 LDG.E.CI load0B0, [track0B + 4x<0>];
+--:-:3:-:1  @P2 LDG.E.CI load0B1, [track0B + 4x<1>];
+--:-:3:-:1  @P2 LDG.E.CI load0B2, [track0B + 4x<2>];
+--:-:3:-:1  @P2 LDG.E.CI load0B3, [track0B + 4x<3>];
 
---:-:4:-:1  @P5 LDG.E.CI load1B0, [track1B + 4x<0>];
---:-:4:-:1  @P5 LDG.E.CI load1B1, [track1B + 4x<1>];
---:-:4:-:1  @P5 LDG.E.CI load1B2, [track1B + 4x<2>];
---:-:4:-:1  @P5 LDG.E.CI load1B3, [track1B + 4x<3>];
+--:-:4:-:1  @P3 LDG.E.CI load1B0, [track1B + 4x<0>];
+--:-:4:-:1  @P3 LDG.E.CI load1B1, [track1B + 4x<1>];
+--:-:4:-:1  @P3 LDG.E.CI load1B2, [track1B + 4x<2>];
+--:-:4:-:1  @P3 LDG.E.CI load1B3, [track1B + 4x<3>];
 
 --:-:5:-:1  @P5 LDG.E.CI load2B0, [track2B + 4x<0>];
 --:-:5:-:1  @P5 LDG.E.CI load2B1, [track2B + 4x<1>];
@@ -363,6 +365,11 @@ REMAINDER:
 --:-:5:-:1  @P5 LDG.E.CI load3B1, [track3B + 4x<1>];
 --:-:5:-:1  @P5 LDG.E.CI load3B2, [track3B + 4x<2>];
 --:-:5:-:1  @P5 LDG.E.CI load3B3, [track3B + 4x<3>];
+
+--:-:6:-:1  @P6 LDG.E.CI loadA0,  [trackA + 4x<0>];
+--:-:6:-:1  @P6 LDG.E.CI loadA1,  [trackA + 4x<1>];
+--:-:6:-:1  @P6 LDG.E.CI loadA2,  [trackA + 4x<2>];
+--:-:6:-:1  @P6 LDG.E.CI loadA3,  [trackA + 4x<3>];
     };
 </CODE>
 
@@ -372,39 +379,33 @@ REMAINDER:
     our $shiftBX = 0;
     our %insert =
     (
-        j0c14 => "--:-:-:-:1      ISETP.GE.AND P0, PT, k, 32, PT;\n",
+        j0c6   => "--:-:-:-:1      IADD k, k, -16;\n",
+        j0c14  => "--:-:-:-:1      ISETP.GE.AND P0, PT, k, 16, PT;\n",
 
-        j4c18  => "04:-:-:-:1  \@P0 STS.128 [writeBs + 4x<0*128>], load0B;\n",
- 
-        j4c20  => "--:-:-:-:1  \@P5 IADD   track0B0.CC, track0B0, ldb16;\n",
-        j4c25  => "--:-:-:-:1  \@P5 IADD.X track0B1,    track0B1, RZ;\n",
- 
-        j6c18  => "08:-:-:-:1  \@P0 STS.128 [writeBs + 4x<4*128>], load1B;\n",
- 
-        j6c20  => "--:-:-:-:1  \@P5 IADD   track1B0.CC, track1B0, ldb16;\n",
-        j6c25  => "--:-:-:-:1  \@P5 IADD.X track1B1,    track1B1, RZ;\n",
- 
-        j8c18  => "10:-:-:-:1  \@P0 STS.128 [writeBs + 4x<8*128>], load2B;\n",
- 
-        j8c20  => "--:-:-:-:1  \@P5 IADD   track2B0.CC, track2B0, ldb16;\n",
-        j8c25  => "--:-:-:-:1  \@P5 IADD.X track2B1,    track2B1, RZ;\n",
+        j2c16  => "--:-:-:-:1  \@P2 IADD   track0B0.CC, track0B0, ldb16;\n",
+        j2c22  => "--:-:-:-:1  \@P2 IADD.X track0B1,    track0B1, RZ;\n",
+        j4c16  => "--:-:-:-:1  \@P3 IADD   track1B0.CC, track1B0, ldb16;\n",
+        j4c22  => "--:-:-:-:1  \@P3 IADD.X track1B1,    track1B1, RZ;\n",
+        j6c16  => "--:-:-:-:1  \@P5 IADD   track2B0.CC, track2B0, ldb16;\n",
+        j6c22  => "--:-:-:-:1  \@P5 IADD.X track2B1,    track2B1, RZ;\n",
+        j8c16  => "--:-:-:-:1  \@P5 IADD   track3B0.CC, track3B0, ldb16;\n",
+        j8c22  => "--:-:-:-:1  \@P5 IADD.X track3B1,    track3B1, RZ;\n",
+        j10c22 => "--:-:-:-:1  \@P6 IADD   trackA0.CC,  trackA0, 4x<16>;\n",
+        j10c27 => "--:-:-:-:1  \@P6 IADD.X trackA1,     trackA1, RZ;\n",
 
-        j10c18 => "--:-:-:-:1  \@P0 STS.128 [writeBs + 4x<12*128>], load3B;\n",
+        j2c12  => "04:3:-:-:1  \@P0 STS.128 [writeBs + 4x< 0*128>], load0B;\n",
+        j4c12  => "08:4:-:-:1  \@P0 STS.128 [writeBs + 4x< 4*128>], load1B;\n",
+        j6c12  => "10:-:-:-:1  \@P0 STS.128 [writeBs + 4x< 8*128>], load2B;\n",
+        j8c12  => "10:5:-:-:1  \@P0 STS.128 [writeBs + 4x<12*128>], load3B;\n",
+        j10c13 => "20:-:-:-:1  \@P0 STS [writeAs + 4x<0*32>], loadA0;\n",
+        j10c15 => "--:-:-:-:1  \@P0 STS [writeAs + 4x<1*32>], loadA1;\n",
+        j10c17 => "--:-:-:-:1  \@P0 STS [writeAs + 4x<2*32>], loadA2;\n",
+        j10c19 => "--:6:-:-:1  \@P0 STS [writeAs + 4x<3*32>], loadA3;\n",
 
-        j10c20 => "--:-:-:-:1  \@P5 IADD   track3B0.CC, track3B0, ldb16;\n",
-        j10c25 => "--:-:-:-:1  \@P5 IADD.X track3B1,    track3B1, RZ;\n",
-
-        j12c18 => "20:-:-:-:1  \@P0 STS [writeAs + 4x<0*32>], loadA0;\n",
-        j12c20 => "--:-:-:-:1  \@P0 STS [writeAs + 4x<1*32>], loadA1;\n",
-        j13c12 => "--:-:-:-:1  \@P0 STS [writeAs + 4x<2*32>], loadA2;\n",
-        j13c14 => "--:-:-:-:1  \@P0 STS [writeAs + 4x<3*32>], loadA3;\n",
-
-        j12c31 => "--:-:-:-:1  \@P6 IADD   trackA0.CC, trackA0, 4x<16>;\n",
-        j13c15 => "--:-:-:-:1  \@P6 IADD.X trackA1,    trackA1, RZ;\n",
-
-        j13c17 => "--:-:-:-:1      IADD k, k, -16;\n",
-        j13c28 => "--:-:-:-:1      ISETP.GE.AND P5, PT, k, 32, P5;\n",
-        j13c30 => "--:-:-:-:1      ISETP.GE.AND P6, PT, k, 32, P6;\n",
+        j2c24  => "--:-:-:-:1      ISETP.GE.AND P2, PT, k, 32, P2;\n",
+        j4c24  => "--:-:-:-:1      ISETP.GE.AND P3, PT, k, 32, P3;\n",
+        j8c24  => "--:-:-:-:1      ISETP.GE.AND P5, PT, k, 32, P5;\n",
+        j10c29 => "--:-:-:-:1      ISETP.GE.AND P6, PT, k, 32, P6;\n",
 
         j13c31 => "--:-:-:-:5  \@P0 BAR.SYNC 0;\n" .
                   "--:-:-:-:1  \@P0 IADD readAs,  readAs, -swapBuf;\n" .
@@ -413,42 +414,40 @@ REMAINDER:
                   "--:-:-:-:1  \@P0 IADD writeBs, writeBs, swapBuf;\n" .
                   "--:-:-:-:1  \@P0 IADD swapBuf, RZ,     -swapBuf;\n",
 
-        j15c14 => "--:-:-:-:1      ISETP.GE.AND P0, PT, k, 16, PT;\n",
-
         ($vec ? 
             (
-                j14c6  => "--:-:3:-:1  \@P5 LDG.E.CI.128 load0B, [track0B];\n",
-                j14c8  => "--:-:4:-:1  \@P5 LDG.E.CI.128 load1B, [track1B];\n",
-                j14c10 => "--:-:5:-:1  \@P5 LDG.E.CI.128 load2B, [track2B];\n",
-                j14c12 => "--:-:5:-:1  \@P5 LDG.E.CI.128 load3B, [track3B];\n",
-                j14c14 => "--:-:6:-:1  \@P6 LDG.E.CI.128 loadA,  [trackA];\n",
+                j3c15  => "04:-:3:-:1  \@P2 LDG.E.CI.128 load0B, [track0B];\n",
+                j5c15  => "08:-:4:-:1  \@P3 LDG.E.CI.128 load1B, [track1B];\n",
+                j9c15  => "10:-:-:-:1  \@P5 LDG.E.CI.128 load2B, [track2B];\n",
+                j9c19  => "--:-:5:-:1  \@P5 LDG.E.CI.128 load3B, [track3B];\n",
+                j11c20 => "20:-:6:-:1  \@P6 LDG.E.CI.128 loadA,  [trackA];\n",
             ) :
             (
 
-                j14c6  => "--:-:3:-:1  \@P5 LDG.E.CI load0B0, [track0B + 4x<0>];\n",
-                j14c8  => "--:-:3:-:1  \@P5 LDG.E.CI load0B1, [track0B + 4x<1>];\n",
-                j14c10 => "--:-:3:-:1  \@P5 LDG.E.CI load0B2, [track0B + 4x<2>];\n",
-                j14c12 => "--:-:3:-:1  \@P5 LDG.E.CI load0B3, [track0B + 4x<3>];\n",
+                j3c18  => "04:-:-:-:1  \@P2 LDG.E.CI load0B0, [track0B + 4x<0>];\n",
+                j3c20  => "--:-:-:-:1  \@P2 LDG.E.CI load0B1, [track0B + 4x<1>];\n",
+                j3c22  => "--:-:-:-:1  \@P2 LDG.E.CI load0B2, [track0B + 4x<2>];\n",
+                j3c24  => "--:-:3:-:1  \@P2 LDG.E.CI load0B3, [track0B + 4x<3>];\n",
 
-                j14c18 => "--:-:4:-:1  \@P5 LDG.E.CI load1B0, [track1B + 4x<0>];\n",
-                j14c20 => "--:-:4:-:1  \@P5 LDG.E.CI load1B1, [track1B + 4x<1>];\n",
-                j14c22 => "--:-:4:-:1  \@P5 LDG.E.CI load1B2, [track1B + 4x<2>];\n",
-                j14c24 => "--:-:4:-:1  \@P5 LDG.E.CI load1B3, [track1B + 4x<3>];\n",
+                j5c18  => "08:-:-:-:1  \@P3 LDG.E.CI load1B0, [track1B + 4x<0>];\n",
+                j5c20  => "--:-:-:-:1  \@P3 LDG.E.CI load1B1, [track1B + 4x<1>];\n",
+                j5c22  => "--:-:-:-:1  \@P3 LDG.E.CI load1B2, [track1B + 4x<2>];\n",
+                j5c24  => "--:-:4:-:1  \@P3 LDG.E.CI load1B3, [track1B + 4x<3>];\n",
 
-                j15c6  => "--:-:5:-:1  \@P5 LDG.E.CI load2B0, [track2B + 4x<0>];\n",
-                j15c8  => "--:-:5:-:1  \@P5 LDG.E.CI load2B1, [track2B + 4x<1>];\n",
-                j15c10 => "--:-:5:-:1  \@P5 LDG.E.CI load2B2, [track2B + 4x<2>];\n",
-                j15c12 => "--:-:5:-:1  \@P5 LDG.E.CI load2B3, [track2B + 4x<3>];\n",
+                j9c18  => "10:-:-:-:1  \@P5 LDG.E.CI load2B0, [track2B + 4x<0>];\n",
+                j9c20  => "--:-:-:-:1  \@P5 LDG.E.CI load2B1, [track2B + 4x<1>];\n",
+                j9c22  => "--:-:-:-:1  \@P5 LDG.E.CI load2B2, [track2B + 4x<2>];\n",
+                j9c24  => "--:-:-:-:1  \@P5 LDG.E.CI load2B3, [track2B + 4x<3>];\n",
 
-                j15c18 => "--:-:5:-:1  \@P5 LDG.E.CI load3B0, [track3B + 4x<0>];\n",
-                j15c20 => "--:-:5:-:1  \@P5 LDG.E.CI load3B1, [track3B + 4x<1>];\n",
-                j15c22 => "--:-:5:-:1  \@P5 LDG.E.CI load3B2, [track3B + 4x<2>];\n",
-                j15c24 => "--:-:5:-:1  \@P5 LDG.E.CI load3B3, [track3B + 4x<3>];\n",
+                j9c27  => "--:-:-:-:1  \@P5 LDG.E.CI load3B0, [track3B + 4x<0>];\n",
+                j9c29  => "--:-:-:-:1  \@P5 LDG.E.CI load3B1, [track3B + 4x<1>];\n",
+                j9c31  => "--:-:-:-:1  \@P5 LDG.E.CI load3B2, [track3B + 4x<2>];\n",
+                j10c1  => "--:-:5:-:1  \@P5 LDG.E.CI load3B3, [track3B + 4x<3>];\n",
 
-                j0c6   => "--:-:6:-:1  \@P6 LDG.E.CI loadA0, [trackA + 4x<0>];\n",
-                j0c8   => "--:-:6:-:1  \@P6 LDG.E.CI loadA1, [trackA + 4x<1>];\n",
-                j0c10  => "--:-:6:-:1  \@P6 LDG.E.CI loadA2, [trackA + 4x<2>];\n",
-                j0c12  => "--:-:6:-:1  \@P6 LDG.E.CI loadA3, [trackA + 4x<3>];\n",
+                j11c18 => "20:-:-:-:1  \@P6 LDG.E.CI loadA0, [trackA + 4x<0>];\n",
+                j11c20 => "--:-:-:-:1  \@P6 LDG.E.CI loadA1, [trackA + 4x<1>];\n",
+                j11c22 => "--:-:-:-:1  \@P6 LDG.E.CI loadA2, [trackA + 4x<2>];\n",
+                j11c24 => "--:-:6:-:1  \@P6 LDG.E.CI loadA3, [trackA + 4x<3>];\n",
             )
         ),
 
