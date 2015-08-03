@@ -18,7 +18,7 @@ import traceback as tb
 import numpy as np
 from pycuda.compiler import SourceModule
 from pycuda.tools import context_dependent_memoize
-from pytools import memoize_method
+from pytools import memoize, memoize_method
 import pycuda.driver as drv
 import nervanagpu as ng
 # from ipdb import set_trace
@@ -200,6 +200,57 @@ __device__ unsigned short fp32_to_fp16_rand(
     return half;
 }
 """,
+        "i4"  : r"""
+__device__ __forceinline__ int fp32_to_int32_rand(
+    float val, unsigned& lfsr0, unsigned& lfsr1, unsigned& lfsr2)
+{
+    unsigned urand = urand_gen(lfsr0, lfsr1, lfsr2);
+    int ret;
+    asm("{\n\t"
+        ".reg .f32 frand, result32;\n\t"
+        "cvt.rz.f32.u32 frand, %2;\n\t"
+        "copysign.f32 frand, %1, frand;\n\t"
+        "mul.rz.f32 frand, frand, 0F2f800000;\n\t"
+        "add.rz.f32 result32, frand, %1;\n\t"
+        "cvt.rzi.s32.f32 %0, result32;\n\t"
+        "}" : "=r"(ret) : "f"(val), "r"(urand));
+    return ret;
+}
+""",
+        "i2"  : r"""
+__device__ __forceinline__ short fp32_to_int16_rand(
+    float val, unsigned& lfsr0, unsigned& lfsr1, unsigned& lfsr2)
+{
+    unsigned urand = urand_gen(lfsr0, lfsr1, lfsr2);
+    short half;
+    asm("{\n\t"
+        ".reg .f32 frand, result32;\n\t"
+        "cvt.rz.f32.u32 frand, %2;\n\t"
+        "copysign.f32 frand, %1, frand;\n\t"
+        "mul.rz.f32 frand, frand, 0F2f800000;\n\t"
+        "add.rz.f32 result32, frand, %1;\n\t"
+        "cvt.rzi.s16.f32 %0, result32;\n\t"
+        "}" : "=h"(half) : "f"(val), "r"(urand));
+    return half;
+}
+""",
+        "i1"  : r"""
+__device__ __forceinline__ char fp32_to_int8_rand(
+    float val, unsigned& lfsr0, unsigned& lfsr1, unsigned& lfsr2)
+{
+    unsigned urand = urand_gen(lfsr0, lfsr1, lfsr2);
+    int ret;
+    asm("{\n\t"
+        ".reg .f32 frand, result32;\n\t"
+        "cvt.rz.f32.u32 frand, %2;\n\t"
+        "copysign.f32 frand, %1, frand;\n\t"
+        "mul.rz.f32 frand, frand, 0F2f800000;\n\t"
+        "add.rz.f32 result32, frand, %1;\n\t"
+        "cvt.rzi.s8.f32 %0, result32;\n\t"
+        "}" : "=r"(ret) : "f"(val), "r"(urand));
+    return ret;
+}
+""",
     },
     "nearest" : {
 
@@ -265,8 +316,8 @@ __device__ __forceinline__ unsigned char fp32_to_uint8(float val)
 """,
     },
 }
-# random rounding not used for these types
-for dtype in ("i4","u4","i2","u2","i1","u1"):
+# random rounding not yet used for these types
+for dtype in ("u4","u2","u1"):
     _common_round["random"][dtype] = _common_round["nearest"][dtype]
 
 
@@ -381,21 +432,21 @@ _ew_strings = {
         "random"  : {
             "f4"  : "float {0}          = fp32_to_fp32_rand({1}, lfsr0, lfsr1, lfsr2, rand_scale, rand_mask);",
             "f2"  : "unsigned short {0} = fp32_to_fp16_rand({1}, lfsr0, lfsr1, lfsr2, rand_scale, rand_mask);",
-            "i4"  : "int {0}            = fp32_to_int32({1});",
             "u4"  : "unsigned int {0}   = fp32_to_uint32({1});",
-            "i2"  : "short {0}          = fp32_to_int16({1});",
             "u2"  : "unsigned short {0} = fp32_to_uint16({1});",
-            "i1"  : "char {0}           = fp32_to_int8({1});",
             "u1"  : "unsigned char {0}  = fp32_to_uint8({1});",
+            "i4"  : "int {0}            = fp32_to_int32_rand({1});",
+            "i2"  : "short {0}          = fp32_to_int16_rand({1});",
+            "i1"  : "char {0}           = fp32_to_int8_rand({1});",
         },
         "nearest" : {
             "f2"  : "unsigned short {0} = fp32_to_fp16({1});",
-            "i4"  : "int {0}            = fp32_to_int32({1});",
             "u4"  : "unsignedint {0}    = fp32_to_uint32({1});",
-            "i2"  : "short {0}          = fp32_to_int16({1});",
             "u2"  : "unsigned short {0} = fp32_to_uint16({1});",
-            "i1"  : "char {0}           = fp32_to_int8({1});",
             "u1"  : "unsigned char {0}  = fp32_to_uint8({1});",
+            "i4"  : "int {0}            = fp32_to_int32({1});",
+            "i2"  : "short {0}          = fp32_to_int16({1});",
+            "i1"  : "char {0}           = fp32_to_int8({1});",
         },
     },
 }
@@ -983,8 +1034,27 @@ def _get_compound_kernel(type_args):
 
     return kernel
 
+@memoize
+def _get_fast_ew_dims(size):
+
+    # TODO: I can probably do much better than this code below, 
+    # but I think most tensors are evenly divisable by 256 off the bat.
+    ew_size = 256
+    while ew_size > 0:
+        if size % ew_size == 0:
+            break
+        ew_size -= 32
+    if ew_size == 0:
+        ew_size = 255
+        while ew_size > 0:
+            if size % ew_size == 0:
+                break
+            ew_size -= 1
+
+    shape = (size // ew_size, ew_size)
+    return (shape, ng._contiguous_strides(shape))
+
 # TODO: build a program wide DAG and only call this once at startup per assignment.
-# TODO: allow multiple shape compatible assignments.
 def call_compound_kernel(rand_state, *args):
     """
     Pass in a list of GPUTensor objects, constants and operators in postfix notation..
@@ -1005,11 +1075,12 @@ def call_compound_kernel(rand_state, *args):
     # Apply reduction constraints and determine thread axis
     # Blocks will be allocated counter to this axis
     # Also detect if this is a broadcast or transpose op.
-    reduction = False
-    broadcast = False
-    transpose = False
-    argminmax = False
-    takeop    = False
+    contiguous = True
+    reduction  = False
+    broadcast  = False
+    transpose  = False
+    argminmax  = False
+    takeop     = False
     axis = 1
     for arg in args:
         if type(arg) is dict:
@@ -1040,7 +1111,8 @@ def call_compound_kernel(rand_state, *args):
                 transpose = True
             elif arg.take_array:
                 takeop = True
-
+            elif not arg.is_contiguous:
+                contiguous = False
 
     # If reducing along axis 0 we need to reverse all strides.
     # Each block gets a column and the threads work down the columns.
@@ -1052,13 +1124,17 @@ def call_compound_kernel(rand_state, *args):
         if isinstance(arg, ng.GPUTensor):
 
             # for complex operations, use the native dimensions
-            if len(arg.shape) == 2 and (broadcast or reduction or transpose or takeop):
-                shape   = arg.shape
-                strides = list(arg.strides[::stride_order])
+            if broadcast or reduction or transpose or takeop or not contiguous:
+                if len(arg.shape) == 2:
+                    shape   = arg.shape
+                    strides = list(arg.strides[::stride_order])
+                else:
+                    raise ValueError("Operations that are not simple elementwise are only currently supported in 2 dimensions.")
+
             # use more efficient 2d dimensions if this is a plain ew op.
             else:
-                shape   = arg.shape_ew
-                strides = list(arg.strides_ew[::stride_order])
+                shape, strides = _get_fast_ew_dims(arg.size)
+                strides = list(strides[::stride_order])
 
             # If same array is passed in multiple times to expression,
             # consolidate them into one kernel argument.
@@ -1083,11 +1159,11 @@ def call_compound_kernel(rand_state, *args):
                 if shape[1] == 1:
                     strides[axis]   = 0
 
+                kernel_args.extend((arg.gpudata, strides[0], strides[1]))
+                
                 # fancy indexing/take
                 if arg.take_array:
-                    kernel_args.extend((arg.gpudata, strides[0], strides[1], arg.take_array[0].gpudata))
-                else:
-                    kernel_args.extend((arg.gpudata, strides[0], strides[1]))
+                    kernel_args.append(arg.take_array[0].gpudata)
 
             # swap the take axis when reducing axis=0
             # also add 1 to distinguish between no take operations

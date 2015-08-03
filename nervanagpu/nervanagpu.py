@@ -19,7 +19,7 @@ import pycuda.driver as drv
 from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
-from .float_ew import call_compound_kernel, _get_compensated_sum_kernel
+from .float_ew import call_compound_kernel, _get_compensated_sum_kernel, _get_fast_ew_dims
 from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 
 if sys.version_info >= (3, 0):
@@ -77,27 +77,6 @@ class GPUTensor(object):
         self.kahan_count = 0
         self.kahan_reset = 0
 
-        # calculate dims that are efficient for elementwise ops
-        # (that don't involve a reduction or broadcast along an axis)
-        if len(shape) == 2 and (size < 256*16 or is_trans or shape[0] == 1 or shape[1] == 1 or take_array):
-            self.shape_ew   = shape
-            self.strides_ew = self.strides
-        else:
-            ew_size = 256
-            while ew_size > 0:
-                if size % ew_size == 0:
-                    break
-                ew_size -= 32
-            if ew_size == 0:
-                ew_size = 255
-                while ew_size > 0:
-                    if size % ew_size == 0:
-                        break
-                    ew_size -= 1
-
-            self.shape_ew   = (size // ew_size, ew_size)
-            self.strides_ew = _contiguous_strides(self.shape_ew)
-
         if gpudata is None:
             if size:
                 #print(drv.mem_get_info())
@@ -113,37 +92,6 @@ class GPUTensor(object):
         return ("Array(0x%x) name:%s dtype:%s shape:%s strides:%s "
                 " is_trans:%s" % (self.gpudata, self.name, self.dtype,
                 self.shape, self.strides, self.is_trans))
-
-    def __getstate__(self):
-        """
-        Defines what and how we go about serializing an instance of this class.
-
-        Returns:
-            numpy.ndarray: Representation of the underlying
-                           `cudanet.CUDAMatrix` tensor
-        """
-        statedict = {'numpydata': self.asnumpyarray(),
-                     'shape':     self.shape,
-                     'dtype':     self.dtype,
-                     'strides':   self.strides,
-                     'is_trans':  self.is_trans,
-                     'name':      self.name}
-        return statedict
-
-    def __setstate__(self, statedict):
-        """
-        Defines how we go about deserializing into an instance of this class.
-
-        Arguments:
-            state (numpy.ndarray): Serialized representation of the underlying
-                                   `cudanet.CUDAMatrix` tensor to be unpacked.
-        """
-        kwargs = {x: statedict[x] for x in statedict.keys()
-                                  if x not in ('shape', 'numpydata')}
-        import pycuda.autoinit  # TODO: Only create if it does not exist
-
-        self.__init__(statedict['shape'], dtype=np.float32)
-        self.fill(statedict['numpydata'])
 
     def __repr__(self):
         return self.__str__()
@@ -167,7 +115,7 @@ class GPUTensor(object):
     def is_contiguous(self):
         return not self.take_array and self.strides == _contiguous_strides(self.shape) 
 
-    def set(self, ary, device=None):
+    def set(self, ary):
         """
         copy host array to device.
         Arguments:
@@ -183,15 +131,7 @@ class GPUTensor(object):
             ary = ary.astype(self.dtype)
         assert ary.strides == tuple(self.dtype.itemsize*s for s in self.strides)
 
-        if device is None:
-            drv.memcpy_htod_async(self.gpudata, ary, stream)
-        else:
-            # with multithreaded datasets, make a context before copying
-            # and destroy it again once done.
-            lctx = drv.Device(device).make_context()
-            drv.memcpy_htod_async(self.gpudata, ary, stream)
-            lctx.pop()
-            del lctx
+        drv.memcpy_htod_async(self.gpudata, ary, stream)
 
         return self
 
@@ -1096,8 +1036,8 @@ class NervanaGPU(object):
 
         cmp_tensor.kahan_count += 1
 
-        shape    = sum_tensor.shape_ew
-        strides  = sum_tensor.strides_ew
+        shape, strides = _get_fast_ew_dims(sum_tensor.size)
+
         kernel   = _get_compensated_sum_kernel(sum_tensor.dtype.str[1:], sum_tensor.rounding > 0)
 
         kernel.prepared_async_call(
