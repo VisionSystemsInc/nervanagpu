@@ -822,7 +822,17 @@ class NervanaGPU(object):
             else:
                 size = 32
 
-        sizeA, sizeB = (size,128) if m < n else (128,size)
+        if m >= n:
+            if op == "nt": 
+                size = 128
+            sizeA, sizeB = (128,size)
+        else:
+            if op == "tn":
+                size = 128
+            # temp till I can write these kernels (coming soon)
+            elif size == 64:
+                size = 32 
+            sizeA, sizeB = (size,128)
 
         gridA   = m // sizeA + (m % sizeA != 0)
         gridB   = n // sizeB + (n % sizeB != 0)
