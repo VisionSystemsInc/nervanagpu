@@ -192,7 +192,9 @@ class ConvLayer(Layer):
 
         # Compute the output spatial dimensions
         M = int(ceil(float(D - T + 1 + 2*pad_d) / str_d))
+        #if not P:
         P = int(ceil(float(H - R + 1 + 2*pad_h) / str_h))
+        #if not Q:
         Q = int(ceil(float(W - S + 1 + 2*pad_w) / str_w))
 
         self.C = C
@@ -373,6 +375,217 @@ class ConvLayer(Layer):
     def __str__(self):
         return "ConvLayer: NCK: (%d, %d, %d) DHW:%s TRS:%s MPQ:%s" % \
                 (self.N, self.C, self.K, self.DHW, self.TRS, self.MPQ)
+
+# Add entire class
+class DeconvLayer(Layer):
+
+    def __init__(self, lib, dtype,
+            N, C, K,
+            P, Q,
+            R=1, S=1,
+            pad_d=0, pad_h=0, pad_w=0,
+            str_d=1, str_h=1, str_w=1,
+            grid_P=0, grid_Q=0, update_size=None):
+
+        super(DeconvLayer, self).__init__(lib, dtype, N)
+
+        assert N % 8 == 0, "N dim must be multiple of 8"
+        assert K % 8 == 0, "K dim must be multiple of 8"
+
+        # Set T, M and D to be consts. 
+        T = 1
+        M = 1
+        D = 1
+        
+        # Cannot get exact, e.g. because not unique 
+        H = (P-1) * str_h - 2 * pad_h + R  
+        W = (Q-1) * str_w - 2 * pad_w + S  
+        
+        # Add below to get H and W tracked
+        self.H = H
+        self.W = W
+
+        self.C = C
+        self.K = K
+        self.M = M
+        self.P = P
+        self.Q = Q
+        self.NCK = (N,C,K)
+        self.TRS = (T,R,S)
+        self.DHW = (D,H,W)
+        self.MPQ = (M,P,Q)
+        self.padding = (pad_d, pad_h, pad_w)
+        self.strides = (str_d, str_h, str_w)
+
+        self.dimI   = (C,D,H,W,N)
+        self.dimF   = (C,T,R,S,K)
+        self.dimO   = (K,M,P,Q,N)
+        self.dimI2  = (C*D*H*W,N)
+        self.dimF2  = (C*T*R*S,K)
+        self.dimO2  = (K*M*P*Q,N)
+        self.sizeI  = reduce(mul, self.dimI, 1)
+        self.sizeF  = reduce(mul, self.dimF, 1)
+        self.sizeO  = reduce(mul, self.dimO, 1)
+        # nOut has to change because P and Q are now the inputs
+        self.nOut   = reduce(mul, self.DHW,  1) * C 
+
+        # precompute some multiplications for fast constant memory access
+        WN   = W*N
+        HWN  = H*WN
+        DHWN = D*HWN
+        RS   = R*S
+        RST  = T*RS
+        CRST = C*RST
+        PQ   = P*Q
+        PM   = P*M
+        PQM  = M*PQ
+        QN   = Q*N
+        PQN  = P*QN
+        MPQN = M*PQN
+
+        # I can easily get the kernels working with larger values here.. 
+        # But this is what version 1 is coded to support.
+        assert PQM < 2**16, "Integer division is faster with 16bit numerators"
+
+        # Kernels can be recoded to support 32bit numerators at
+        # some performance loss.
+        assert CRST+8 < 2**16, "Integer division is faster with 16bit numerators"
+
+        # precompute grid dimensions
+        grid_N64  = N    // 64 + (N    % 64 != 0)
+        grid_K64  = K    // 64 + (K    % 64 != 0)
+        grid_C64  = CRST // 64 + (CRST % 64 != 0)
+
+        grid_N128 = N    // 128 + (N    % 128 != 0)
+        grid_K128 = K    // 128 + (K    % 128 != 0)
+        grid_C128 = CRST // 128 + (CRST % 128 != 0)
+
+        #TODO: add more 128x128 kernels for better performance at fp32.
+        self.fprop_grid = (PQM, grid_K64,  grid_N64)
+        self.bprop_grid = (PQM, grid_C128, grid_N64)
+        self.fprop_block = (64,  1, 1)
+        self.bprop_block = (128, 1, 1)
+        self.fprop_size = "K64_N64"
+        self.bprop_size = "C128_N64"
+
+        #TODO: tune this further
+        if  (update_size is None or update_size == "C64_K64" or update_size == "C128_K64") and \
+            (CRST <= 64 or K <= 64 or (K % 64 == 0 and K % 128 != 0)):
+
+            if self.dtype is np.float32:
+                self.updat_size = "C128_K64"
+                updat_grid  = [0, grid_C128, grid_K64]
+                updat_block = 128
+            else:
+                self.updat_size = "C64_K64"
+                updat_grid  = [0, grid_C64, grid_K64]
+                updat_block = 64
+        else:
+            self.updat_size = "C128_K128"
+            updat_grid  = [0, grid_C128, grid_K128]
+            updat_block = 256
+
+        if grid_P == 0 or grid_Q == 0:
+            # Performance seems good with at least 4096 total threads per SM
+            # More threads might be faster but accuracy starts dropping off.
+            # Cap grid_P*grid_Q at 64 for fp16.
+            # TODO: explore L2 utilization here:
+            if self.dtype is np.float16:
+                inc_P  = False
+                grid_P = 1
+                grid_Q = 1
+                grid_O = updat_grid[1] * updat_grid[2] * M * updat_block
+                thresh = _get_sm_count() * 4096
+                while grid_O * grid_P * grid_Q < thresh and \
+                      grid_P <= P and grid_Q <= Q and \
+                      grid_P * grid_Q < 64:
+                    if inc_P:
+                        grid_P += 1
+                    else:
+                        grid_Q += 1
+                    inc_P = not inc_P
+            # When not concerned about accumulation accuracy just unroll things a bit
+            # but maximize the distribution.  This has the effect of better utilizing the L2.
+            else:
+                grid_P = P
+                grid_Q = Q // 4
+
+            # TitanX optimization: make grid multiple of 24 for small grids
+            # TODO: explore L2 utilization here:
+            # TODO: add 980, 750, etc optimizations
+            if _get_sm_count() == 24:
+                grid_PQ  = grid_P * grid_Q
+                if   grid_PQ < 30:
+                    grid_P = 6
+                    grid_Q = 4
+                elif grid_PQ < 54:
+                    grid_P = 8
+                    grid_Q = 6
+                elif grid_PQ < 78:
+                    grid_P = 9
+                    grid_Q = 8
+                elif grid_PQ <= 108:
+                    grid_P = 12
+                    grid_Q = 8
+
+        if grid_P >= P: grid_P = P
+        if grid_Q >= Q: grid_Q = Q
+
+        grid_PQ  = grid_P * grid_Q
+        grid_PQM = updat_grid[0] = grid_PQ * M
+
+
+        self.updat_grid  = tuple(updat_grid)
+        self.updat_block = (updat_block,1,1)
+
+        # precompute the magic numbers and shift amounts for integer division
+        magic_RST = _magic32(CRST+8, RST)
+        magic_RS  = _magic32(RST+32, RS)
+        magic_S   = _magic32(RS+32,  S)
+        magic_PQ  = _magic32(PQM, PQ)
+        magic_Q   = _magic32(PQ,  Q)
+        magic_PQu = _magic32(grid_PQM, grid_PQ)
+        magic_Qu  = _magic32(grid_PQ,  grid_Q)
+
+        # generate the convolution kernel args for fprop and bprop
+        self.kernel_args = _flatten([
+            N, K, D, H, W, WN, HWN, DHWN,
+            C, CRST, RST, magic_RST, RS, magic_RS, S, magic_S,
+            pad_d, pad_h, pad_w, str_d, str_h, str_w,
+            P, Q, PQ, QN, PQN, MPQN, magic_Q, magic_PQ,
+            grid_P, grid_Q, grid_PQ])
+
+        # update uses slightly different args
+        self.update_args = _flatten([
+            N, K, D, H, W, WN, HWN, DHWN,
+            C, CRST, RST, magic_RST, RS, magic_RS, S, magic_S,
+            pad_d, pad_h, pad_w, str_d, str_h, str_w,
+            P, Q, PQ, QN, PQN, MPQN, magic_Qu, magic_PQu,
+            grid_P, grid_Q, grid_PQ])
+
+        # shared lookup table size
+        self.lut_size = (RST // 32 + (RST  % 32 != 0)) * 32 * 4
+
+        # flop count for benchmarking
+        self.flops    = PQM * K * N * CRST * 2.0
+
+    def fprop(self):
+            self.lib.fprop_conv(self, self.fprop_in, self.weights, self.fprop_out, relu=True)
+
+    def bprop(self):
+            self.bprop_relu()
+            if self.bprop_out is not None:
+                self.lib.bprop_conv(self, self.weights, self.bprop_in, self.bprop_out)
+
+    def update(self, momentum, learning_rate):
+            self.lib.update_conv(self, self.fprop_in, self.bprop_in, self.updates)
+            self.grad_descent_momentum(momentum, learning_rate)
+
+    def __str__(self):
+        return "ConvLayer: NCK: (%d, %d, %d) DHW:%s TRS:%s MPQ:%s" % \
+                (self.N, self.C, self.K, self.DHW, self.TRS, self.MPQ)
+
+
 
 class PoolLayer(Layer):
 
