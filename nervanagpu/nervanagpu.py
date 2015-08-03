@@ -120,7 +120,6 @@ class GPUTensor(object):
         copy host array to device.
         Arguments:
             ary: host array, needs to be contiguous
-            device: device id, if not the one attached to current context
         Returns:
             self
         """
@@ -319,7 +318,7 @@ class GPUTensor(object):
 
         # assign to numpy array (same as set())
         elif isinstance(value, np.ndarray):
-            self.set(value, device=None)
+            self.set(value)
 
         else:
             raise TypeError("Invalid type for assignment: %s" % type(value))
