@@ -87,7 +87,7 @@ cpuC = devC.get()
 
 ### Element-wise operations
 
-**nervanagpu** compiles tensor arithmetic expressions into efficient CUDA kernels which are lazily evaluated upon assignment. For example, computing variance along an axis consists of a set of element-wise, reduction and broadcast operations that compiles to a single kernel:
+**nervanagpu** compiles tensor arithmetic expressions into efficient CUDA kernels which are lazily evaluated upon assignment. For example, computing variance along an axis consists of a set of element-wise, reduction and broadcast operations that compiles to a single kernel (this code is also provided by the ng.var operator):
 
 ```python
 # import and initialize NervanaGPU, transfer matrix from cpu to dev as above
@@ -101,15 +101,15 @@ Batch normalization can be done by computing mean and variance across the batch 
 ```python
 # import and initialize NervanaGPU as above
 
-eps  = .001
+eps  = .001 # for avoiding division by zero
 A    = ng.empty((128, 32), dtype=np.float16)
 A[:] = ng.rand() # generate uniform random on device between 0 and 1
 
 # Normalize batch data by batch mean and variance, 
-A[:] = ng.reciprocal(ng.sqrt(ng.var(A, axis=1) + eps)) * (A - ng.mean(A, axis=1)) 
+A[:] = (A - ng.mean(A, axis=1)) / ng.sqrt(ng.var(A, axis=1) + eps)
 
 ```
-The last expression above is automatically collapsed into a single gpu kernel. The two mean(A,axis=1) expressions are automatically simplified into one. To be able to broadcast a reduction to a subsequent operation the reduction op must appear prior to the broadcast op in the [*postfix*](http://en.wikipedia.org/wiki/Reverse_Polish_notation) version of the expression. Hence, the reciprocal operation instead of division.
+The last expression above is automatically collapsed into a single gpu kernel. There are two mean(A,axis=1) operations embedded in that expression (one in the numerator and one inside the variance operation).  One of them is automatically optimized away, leading to the most efficient kernel possible.
 
 ## Building
 

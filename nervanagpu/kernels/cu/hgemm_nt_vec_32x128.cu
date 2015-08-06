@@ -15,14 +15,14 @@
  */
 
 extern "C"
-__global__ void __launch_bounds__(128) sgemm_tn_vec_128x32
+__global__ void __launch_bounds__(128) hgemm_nt_vec_32x128
 (
-    unsigned*    param_Rand,
-    const float* param_A,
-    const float* param_B,
-    float*       param_C,
-    int          param_lda8,  
-    int          param_ldb8,  
+    int*         param_Rand,
+    const short* param_A,
+    const short* param_B,
+    short*       param_C,
+    int          param_lda,  
+    int          param_ldb,  
     int          param_ldc,
     int          param_m,
     int          param_n,
@@ -34,9 +34,9 @@ __global__ void __launch_bounds__(128) sgemm_tn_vec_128x32
     int          param_ldbz,
     int          param_ldcz,
     int          param_batch_loops
-) 
+)
 {
-    __shared__ float share[128*16*2 + 32*16*2 + 4];
+    __shared__ float share[(128*16 + 32)*2 + (32*16 + 32)*2 + 4];
 
     int tid = threadIdx.x;
 

@@ -70,7 +70,7 @@ bool nervana_unloadKernels();
                     float alpha, float beta,
                     unsigned int *rand_state,
                     bool stochastic_round, bool apply_relu,
-                    CUstream stream
+                    CUstream stream, int grid=-1
                     );
 
 /** Perform BLAS hgemm on alpha * A * B + beta * C, with the
@@ -102,7 +102,7 @@ bool nervana_unloadKernels();
                     float alpha, float beta,
                     unsigned int *rand_state,
                     bool stochastic_round, bool apply_relu,
-                    CUstream stream
+                    CUstream stream, int grid=-1
                     );
 
 #ifdef __cplusplus

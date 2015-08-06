@@ -20,8 +20,8 @@ from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
 from .float_ew import call_compound_kernel, _get_compensated_sum_kernel
-# 07/22 Add below
-from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, DeconvLayer, _get_sm_count
+from .float_ew import call_compound_kernel, _get_compensated_sum_kernel, _get_fast_ew_dims
+from .layers import DataLayer, FullLayer, ConvLayer, DeconvLayer, PoolLayer, _get_sm_count
 
 if sys.version_info >= (3, 0):
     from functools import reduce
@@ -78,27 +78,6 @@ class GPUTensor(object):
         self.kahan_count = 0
         self.kahan_reset = 0
 
-        # calculate dims that are efficient for elementwise ops
-        # (that don't involve a reduction or broadcast along an axis)
-        if len(shape) == 2 and (size < 256*16 or is_trans or shape[0] == 1 or shape[1] == 1 or take_array):
-            self.shape_ew   = shape
-            self.strides_ew = self.strides
-        else:
-            ew_size = 256
-            while ew_size > 0:
-                if size % ew_size == 0:
-                    break
-                ew_size -= 32
-            if ew_size == 0:
-                ew_size = 255
-                while ew_size > 0:
-                    if size % ew_size == 0:
-                        break
-                    ew_size -= 1
-
-            self.shape_ew   = (size // ew_size, ew_size)
-            self.strides_ew = _contiguous_strides(self.shape_ew)
-
         if gpudata is None:
             if size:
                 #print(drv.mem_get_info())
@@ -114,37 +93,6 @@ class GPUTensor(object):
         return ("Array(0x%x) name:%s dtype:%s shape:%s strides:%s "
                 " is_trans:%s" % (self.gpudata, self.name, self.dtype,
                 self.shape, self.strides, self.is_trans))
-
-    def __getstate__(self):
-        """
-        Defines what and how we go about serializing an instance of this class.
-
-        Returns:
-            numpy.ndarray: Representation of the underlying
-                           `cudanet.CUDAMatrix` tensor
-        """
-        statedict = {'numpydata': self.asnumpyarray(),
-                     'shape':     self.shape,
-                     'dtype':     self.dtype,
-                     'strides':   self.strides,
-                     'is_trans':  self.is_trans,
-                     'name':      self.name}
-        return statedict
-
-    def __setstate__(self, statedict):
-        """
-        Defines how we go about deserializing into an instance of this class.
-
-        Arguments:
-            state (numpy.ndarray): Serialized representation of the underlying
-                                   `cudanet.CUDAMatrix` tensor to be unpacked.
-        """
-        kwargs = {x: statedict[x] for x in statedict.keys()
-                                  if x not in ('shape', 'numpydata')}
-        import pycuda.autoinit  # TODO: Only create if it does not exist
-
-        self.__init__(statedict['shape'], dtype=np.float32)
-        self.fill(statedict['numpydata'])
 
     def __repr__(self):
         return self.__str__()
@@ -168,12 +116,11 @@ class GPUTensor(object):
     def is_contiguous(self):
         return not self.take_array and self.strides == _contiguous_strides(self.shape) 
 
-    def set(self, ary, device=None):
+    def set(self, ary):
         """
         copy host array to device.
         Arguments:
             ary: host array, needs to be contiguous
-            device: device id, if not the one attached to current context
         Returns:
             self
         """
@@ -184,15 +131,7 @@ class GPUTensor(object):
             ary = ary.astype(self.dtype)
         assert ary.strides == tuple(self.dtype.itemsize*s for s in self.strides)
 
-        if device is None:
-            drv.memcpy_htod_async(self.gpudata, ary, stream)
-        else:
-            # with multithreaded datasets, make a context before copying
-            # and destroy it again once done.
-            lctx = drv.Device(device).make_context()
-            drv.memcpy_htod_async(self.gpudata, ary, stream)
-            lctx.pop()
-            del lctx
+        drv.memcpy_htod_async(self.gpudata, ary, stream)
 
         return self
 
@@ -380,7 +319,7 @@ class GPUTensor(object):
 
         # assign to numpy array (same as set())
         elif isinstance(value, np.ndarray):
-            self.set(value, device=None)
+            self.set(value)
 
         else:
             raise TypeError("Invalid type for assignment: %s" % type(value))
@@ -923,36 +862,48 @@ class NervanaGPU(object):
         op = opA + opB
         assert op != "tt"
 
+        short = min(m,n)
         if batch_loops > 1:
             size = 128
         elif size is None:
-            if n % 128 == 0:
+            if short % 128 == 0:
                 size = 128
-            elif n > 32:
+            elif short > 32 and short == n: #temp
                 size = 64
             else:
                 size = 32
 
+        if m >= n:
+            if op == "nt": 
+                size = 128
+            sizeA, sizeB = (128,size)
+        else:
+            if op == "tn":
+                size = 128
+            # temp till I can write these kernels (coming soon)
+            elif size == 64:
+                size = 32 
+            sizeA, sizeB = (size,128)
+
+        gridA   = m // sizeA + (m % sizeA != 0)
+        gridB   = n // sizeB + (n % sizeB != 0)
+        threads = 256 if size == 128 else 128
+        size    = "%dx%d" % (sizeA,sizeB)
+
+        k_vec = 4 if sizeA == 32 or sizeB == 32 else 16
+
+        if  op == "tn" and m % 4 == 0 and n % 4 == 0 or \
+            op == "nn" and k % k_vec == 0 and n % 4 == 0 or \
+            op == "nt" and k % k_vec == 0:
+            op += "_vec"
+
         # nt and nn are more efficient with k%16==0
         if C.dtype.type is np.float16:
             clss = "hgemm"
-            if  op == "tn" and m % 8  == 0 and n % 8 == 0 or \
-                op == "nn" and k % 16 == 0 and n % 8 == 0 or \
-                op == "nt" and k % 16 == 0:
-                op += "_vec"
         elif C.dtype.type is np.float32:
             clss = "sgemm"
-            if  op == "tn" and m % 4  == 0 and n % 4 == 0 or \
-                op == "nn" and k % 16 == 0 and n % 4 == 0 or \
-                op == "nt" and k % 16 == 0:
-                op += "_vec"
         else:
             raise TypeError("Only floating point dot currently supported.")
-
-        gridA   = m // 128  + (m % 128 != 0)
-        gridB   = n // size + (n % size != 0)
-        threads = 256 if size == 128 else 128
-        size    = "128x%d" % size
 
         kernel = _get_gemm_kernel(self.cubin_path, clss, op, size)
         params = [
@@ -994,7 +945,7 @@ class NervanaGPU(object):
 
         relu: if true applied before output (and prior to beta addition)
 
-        size: one of 32, 64, 128.  Sometimes the fastest tiling isn't chosen for you.
+        size: one of 32x128, 128x32, 64x128, 128x64, 128x128.  Sometimes the fastest tiling isn't chosen for you.
         """
         assert A.dtype.type == B.dtype.type == C.dtype.type
 
@@ -1030,24 +981,26 @@ class NervanaGPU(object):
         assert n == C.shape[1]
         assert k == B.shape[0]
 
-        gridA = m // 128 + (m % 128 != 0)
-
-        if op == "nt":
-            size = 128
-
         # Some basic tile size selection.
         # Your best bet is to benchmark your code with all 3 sizes
         # and manually fine tune the selection for each layer.
+        # TODO: Perhaps I'll add an autotuning mode.
         if size is None:
-            if n < 384-16:
-                n128 = n % 128
-                if 0 < n128 < 112:
-                    if 48 < n128 <= 64:
-                        n64  = n // 64
-                        n64 *= gridA // _get_sm_count()
-                        # nn_64 is only faster than nn_32 when occupancy is
-                        # more than 1 warp per scheduler.
-                        if n64 > 1 or op == "tn":
+            # find the shorter side
+            short = min(m,n)
+            # anything bigger than this just use 128
+            if short < 384-16:
+                # compute remainder of 128
+                short128 = short % 128
+                # if remainder is more than 112 just use 128
+                if 0 < short128 < 112:
+                    # to figure out when to use 64 over 32 we need to calc occupancy at 64
+                    if 48 < short128 <= 64:
+                        occupancy64  = short // 64
+                        wide         = max(m,n)
+                        occupancy64 *= (wide // 128 + (wide % 128 != 0)) // _get_sm_count()
+                        # 64 is only faster than 32 when occupancy is more than 1 warp per scheduler.
+                        if occupancy64 > 1:
                             size = 64
                         else:
                             size = 32
@@ -1059,25 +1012,42 @@ class NervanaGPU(object):
             else:
                 size = 128
 
+            # match the kernel to the optimal short size but avoid not implemented kernels
+            if m >= n:
+                if op == "nt": 
+                    size = 128
+                sizeA, sizeB = (128,size)
+            else:
+                if op == "tn":
+                    size = 128
+                # temp till I can write these kernels (coming soon)
+                elif size == 64:
+                    size = 32 
+                sizeA, sizeB = (size,128)
+
+            size = "%dx%d" % (sizeA,sizeB)
+
+        else:
+            sizeA, sizeB = (int(s) for s in size.split('x'))
+
+        gridA   = m // sizeA + (m % sizeA != 0)
+        gridB   = n // sizeB + (n % sizeB != 0)
+        threads = 256 if size == "128x128" else 128
+
+        k_vec = 4 if sizeA == 32 or sizeB == 32 else 16
+
+        if  op == "tn" and m % 4 == 0 and n % 4 == 0 or \
+            op == "nn" and k % k_vec == 0 and n % 4 == 0 or \
+            op == "nt" and k % k_vec == 0:
+            op += "_vec"
+
         # nt and nn are more efficient with k%16==0
-        if C.dtype.type is np.float16:
+        if   C.dtype.type is np.float16:
             clss = "hgemm"
-            if  op == "tn" and m % 8  == 0 and n % 8 == 0 or \
-                op == "nn" and k % 16 == 0 and n % 8 == 0 or \
-                op == "nt" and k % 16 == 0:
-                op += "_vec"
         elif C.dtype.type is np.float32:
             clss = "sgemm"
-            if  op == "tn" and m % 4  == 0 and n % 4 == 0 or \
-                op == "nn" and k % 16 == 0 and n % 4 == 0 or \
-                op == "nt" and k % 16 == 0:
-                op += "_vec"
         else:
             raise TypeError("Only floating point dot currently supported.")
-
-        gridB   = n // size + (n % size != 0)
-        threads = 256 if size == 128 else 128
-        size    = "128x%d" % size
 
         flags = 0
         if C.rounding: flags |= 1 | (C.rounding << 16)
@@ -1125,8 +1095,8 @@ class NervanaGPU(object):
 
         cmp_tensor.kahan_count += 1
 
-        shape    = sum_tensor.shape_ew
-        strides  = sum_tensor.strides_ew
+        shape, strides = _get_fast_ew_dims(sum_tensor.size)
+
         kernel   = _get_compensated_sum_kernel(sum_tensor.dtype.str[1:], sum_tensor.rounding > 0)
 
         kernel.prepared_async_call(
@@ -1229,6 +1199,10 @@ class NervanaGPU(object):
     def take(self, a, indices, axis, out=None):
         return a.take(indices, axis, out)
 
+    def onehot(self, indices, axis, out=None):
+        if axis not in (0,1):
+            raise ValueError("bad axis for onehot")
+        return OpTreeNode.build("onehot", None, None, idx=indices, axis=axis, out=out)
 
 # For constructing an op tree used in lazy evaluation
 class OpTreeNode(tuple):

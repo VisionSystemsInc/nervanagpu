@@ -4,9 +4,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -41,8 +41,8 @@ def cublas_dot(A, B, C, repeat=1):
     k = A.shape[1]
 
     start.record()
-    
-    # Swap A and B to map from C order to Fortran 
+
+    # Swap A and B to map from C order to Fortran
     for r in range(repeat):
         cublas.cublasSgemm(handle, opB, opA, n, m, k, 1.0, B.gpudata, ldb, A.gpudata, lda, 0.0, C.gpudata, ldc)
 
@@ -59,22 +59,29 @@ np.set_printoptions(threshold=8193, linewidth=600, formatter={'float':lambda x: 
 
 ng = NervanaGPU(stochastic_round=False, bench=True)
 
-for dtype in (np.float16,np.float32):
+for dtype in (np.float32, ): #np.float16,
     
-    for K, C, N in ((3072,3072*1,32),(3072,3072*1,64),(3072,3072*1,96),(3072,3072*1,128),
-                    (3072,3072*2,32),(3072,3072*2,64),(3072,3072*2,96),(3072,3072*2,128),
-                    (3072,3072*3,32),(3072,3072*3,64),(3072,3072*3,96),(3072,3072*3,128),
-                    (3072,3072*4,32),(3072,3072*4,64),(3072,3072*4,96),(3072,3072*4,128),): 
+    for K, C, N in ((3072,3072*1,64),): 
+                    #(3072,3072*1,32),(3072,3072*1,64),(3072,3072*1,96),(3072,3072*1,128),): 
+                    #(3072,3072*2,32),(3072,3072*2,64),(3072,3072*2,96),(3072,3072*2,128),
+                    #(3072,3072*3,32),(3072,3072*3,64),(3072,3072*3,96),(3072,3072*3,128),
+                    #(3072,3072*4,32),(3072,3072*4,64),(3072,3072*4,96),(3072,3072*4,128),
+                    #(3072*2,3072,32),(3072*2,3072,64),(3072*2,3072,96),(3072*2,3072,128),
+                    #(3072*3,3072,32),(3072*3,3072,64),(3072*3,3072,96),(3072*3,3072,128),
+                    #(3072*4,3072,32),(3072*4,3072,64),(3072*4,3072,96),(3072*4,3072,128),): 
                     #(3072,3072,32+128*0),(3072,3072,64+128*0),(3072,3072,96+128*0),(3072,3072,128+128*0),
                     #(3072,3072,32+128*1),(3072,3072,64+128*1),(3072,3072,96+128*1),(3072,3072,128+128*1),
                     #(3072,3072,32+128*2),(3072,3072,64+128*2),(3072,3072,96+128*2),(3072,3072,128+128*2),
-                    #(3072,3072,32+128*3),(3072,3072,64+128*3),(3072,3072,96+128*3),(3072,3072,128+128*3),): 
+                    #(3072,3072,32+128*3),(3072,3072,64+128*3),(3072,3072,96+128*3),(3072,3072,128+128*3),):
         for op,  dimA,  dimB,  dimC in (
-          ("nn", (K,C), (C,N), (K,N) ),  # fprop
-          ("tn", (K,C), (K,N), (C,N) ),  # bprop
-          ("nt", (K,N), (C,N), (K,C) )): # update
+            ("nn", (K,C), (C,N), (K,N) ),  # fprop
+            ("tn", (K,C), (K,N), (C,N) ),  # bprop
+            ("nt", (K,N), (C,N), (K,C) )): # update
+            # ("nn", (N,C), (C,K), (N,K) ),  # fprop
+            # ("nt", (N,K), (C,K), (N,C) ),  # bprop
+            # ("tn", (N,C), (N,K), (C,K) )): # update
 
-            repeat = 5000 if C <= 3072 else 500
+            repeat = 500
 
             devA1 = ng.empty(dimA, dtype=dtype)
             devB1 = ng.empty(dimB, dtype=dtype)
@@ -100,27 +107,27 @@ for dtype in (np.float16,np.float32):
             if op[0] == 't': devA1, devA2 = devA1.T, devA2.T
             if op[1] == 't': devB1, devB2 = devB1.T, devB2.T
 
-            glops16 = 0
-            glops32 = 0
-            glops64 = 0
-            if op == "tn" and dtype is np.float16:
-                # Experimental 128x16 gemm kernel
-                glops16 = ng.dot(devA1, devB1, devC1, repeat=repeat, size=16)
+            glops32x128 = 0
+            glops128x32 = 0
+            glops128x64 = 0
+
+            if op != 'tn':
+                glops32x128 = ng.dot(devA1, devB1, devC1, repeat=repeat, size='32x128')
             if op != 'nt':
-                glops32 = ng.dot(devA1, devB1, devC1, repeat=repeat, size=32)
-                glops64 = ng.dot(devA1, devB1, devC1, repeat=repeat, size=64)
-            glops128 = ng.dot(devA1, devB1, devC1, repeat=repeat, size=128)
+                glops128x32 = ng.dot(devA1, devB1, devC1, repeat=repeat, size='128x32')
+                glops128x64 = ng.dot(devA1, devB1, devC1, repeat=repeat, size='128x64')
+            glops128x128 = ng.dot(devA1, devB1, devC1, repeat=repeat, size='128x128')
 
-            glops = max(glops16, glops32, glops64, glops128)
+            glops = max(glops32x128, glops128x32, glops128x64, glops128x128)
 
-            if glops16 == glops:
-                fastest = 16
-            elif glops32 == glops:
-                fastest = 32
-            elif glops64 == glops:
-                fastest = 64
+            if glops32x128 == glops:
+                fastest = '32x128'
+            elif glops128x32 == glops:
+                fastest = '128x32'
+            elif glops128x64 == glops:
+                fastest = '128x64'
             else:
-                fastest = 128
+                fastest = '128x128'
 
             glopsref = cublas_dot(devA2, devB2, devC2, repeat=repeat)
 
@@ -133,8 +140,8 @@ for dtype in (np.float16,np.float32):
             flops_diff = glops - glopsref
 
             note = "**************" if flops_diff <= 0 else ""
-            
-            print("Faster: %.0f gflops Choice: %d Error: %.3f%%%s" %
+
+            print("Faster: %.0f gflops Choice: %s Error: %.3f%%%s" %
                   (flops_diff, fastest, 100 * diff / mean, note))
 
         print("--------------------------------------------------------------------------------")
