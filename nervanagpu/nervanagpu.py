@@ -19,7 +19,6 @@ import pycuda.driver as drv
 from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
-from .float_ew import call_compound_kernel, _get_compensated_sum_kernel
 from .float_ew import call_compound_kernel, _get_compensated_sum_kernel, _get_fast_ew_dims
 from .layers import DataLayer, FullLayer, ConvLayer, DeconvLayer, PoolLayer, _get_sm_count
 
