@@ -376,7 +376,7 @@ class ConvLayer(Layer):
         return "ConvLayer: NCK: (%d, %d, %d) DHW:%s TRS:%s MPQ:%s" % \
                 (self.N, self.C, self.K, self.DHW, self.TRS, self.MPQ)
 
-# Add entire class
+# Add Deconv class
 class DeconvLayer(Layer):
 
     def __init__(self, lib, dtype,
@@ -417,6 +417,8 @@ class DeconvLayer(Layer):
         self.padding = (pad_d, pad_h, pad_w)
         self.strides = (str_d, str_h, str_w)
 
+        # Did not change the names of dimI, dimO, etc. even though dimI is now technically the 
+        # dimension of the output
         self.dimI   = (C,D,H,W,N)
         self.dimF   = (C,T,R,S,K)
         self.dimO   = (K,M,P,Q,N)
@@ -582,7 +584,7 @@ class DeconvLayer(Layer):
             self.grad_descent_momentum(momentum, learning_rate)
 
     def __str__(self):
-        return "ConvLayer: NCK: (%d, %d, %d) DHW:%s TRS:%s MPQ:%s" % \
+        return "DeconvLayer: NCK: (%d, %d, %d) DHW:%s TRS:%s MPQ:%s" % \
                 (self.N, self.C, self.K, self.DHW, self.TRS, self.MPQ)
 
 

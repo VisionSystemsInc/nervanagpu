@@ -602,15 +602,15 @@ class NervanaGPU(object):
         This then is passed as an argument to all the convolution operations.
 
         N: Number of images in mini-batch
-        C: Number of input feature maps
-        K: Number of output feature maps
+        C: Number of output feature maps
+        K: Number of input feature maps
 
-        P: Height of output
-        Q: Width of output
+        P: Height of input 
+        Q: Width of input 
 
-        D: Depth  of input image
-        H: Height of input image
-        W: Width  of input image
+        D: Depth  of output image
+        H: Height of output image
+        W: Width  of output image
 
         T: Depth  of filter kernel
         R: Height of filter kernel
