@@ -19,7 +19,7 @@ import pycuda.driver as drv
 from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
-from .float_ew import call_compound_kernel, _get_compensated_sum_kernel, _get_fast_ew_dims
+from .float_ew import call_compound_kernel, _get_compensated_sum_kernel, _get_fast_ew_dims, _get_transpose_kernel
 from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 
 if sys.version_info >= (3, 0):
@@ -470,7 +470,7 @@ class NervanaGPU(object):
 
     def __init__(self, stochastic_round=False, bench=False,
                  cubin_path=os.path.join("kernels", "cubin"),
-                 default_dtype=np.float16):
+                 scratch_size=64*64*224*224, default_dtype=np.float16):
         """
         NervanaGPU: the primary interface class and factory for GPUTensors
 
@@ -478,18 +478,26 @@ class NervanaGPU(object):
                           set to zero to disable stochastic rouding.
         bench: set to 1 to print out performance data for most kernel calls
         """
-        
         if stochastic_round:
             if stochastic_round is True:
                 stochastic_round = 10
         else:
             stochastic_round = 0
 
+        self.scratch_size = scratch_size
         self.round_mode = stochastic_round
         self.cubin_path = os.path.join(os.path.dirname(__file__), cubin_path)
         self.bench = bench
         self.stream = None
         self.default_dtype = default_dtype
+
+    def scratch_tensor(self, shape, dtype):
+
+        data   = _get_scratch_data(self.scratch_size)
+        tensor = GPUTensor(self, shape, dtype, gpudata=data, name="scratch")
+        if tensor.size > self.scratch_size:
+            raise ValueError("increase scratch_size")
+        return tensor
 
     def empty(self, shape, dtype=None, name=None, allocator=drv.mem_alloc):
         """
@@ -606,10 +614,15 @@ class NervanaGPU(object):
         assert layer.sizeO == E.size
         assert layer.sizeI == grad_I.size
 
+        if layer.F_T is None:
+            layer.F_T = self.scratch_tensor(layer.dimF2[::-1], F.dtype)
+            
+        self.transpose(F, layer.F_T, reshape=layer.dimF2)
+
         return self._execute_conv(
             layer, "bprop", layer.bprop_size,
             layer.bprop_grid, layer.bprop_block, layer.kernel_args, layer.lut_size,
-            F, E, grad_I, alpha, False, True, repeat)
+            layer.F_T, E, grad_I, alpha, False, True, repeat)
 
     def update_conv(self, layer, I, E, grad_F, alpha=1.0, repeat=1):
 
@@ -1034,6 +1047,35 @@ class NervanaGPU(object):
 
         return C
 
+    def transpose(self, a, out, reshape=None, repeat=1):
+
+        if reshape is None:
+            reshape = a.shape
+            strides = a.strides
+        else:
+            strides = _contiguous_strides(reshape)
+
+        gridX   = (reshape[1] >> 5) + (reshape[1] & 31 != 0)
+        gridY   = (reshape[0] >> 5) + (reshape[0] & 31 != 0)
+        kernel  = _get_transpose_kernel(a.dtype.str, out.dtype.str)
+
+        if self.bench or repeat > 1:
+            start, end = _get_events()
+            start.record(self.stream)
+
+        for r in range(repeat):
+            kernel.prepared_async_call(
+                (gridX,gridY,1), (32,8,1), self.stream, 
+                out.gpudata,  a.gpudata, 
+                reshape[0],   reshape[1],
+                strides[0],   strides[1])
+
+        if self.bench or repeat > 1:
+            end.record(self.stream)
+            end.synchronize()
+            msecs = end.time_since(start) / repeat
+            print("%7.3f msecs (transpose: %s => %s) grid:(%d,%d)" % (msecs,reshape,reshape[::-1],gridX,gridY))
+
     def compensated_sum(self, sum_tensor, cmp_tensor, add_tensor, cmp_scale=1.0, add_scale=1.0):
 
         if cmp_tensor.kahan_reset and cmp_tensor.kahan_count > cmp_tensor.kahan_reset:
@@ -1260,6 +1302,10 @@ def _contiguous_strides(shape):
         return tuple(strides[::-1])
     else:
         return ()
+
+@context_dependent_memoize
+def _get_scratch_data(scratch_size):
+    return drv.mem_alloc(scratch_size*4)
 
 @context_dependent_memoize
 def _get_rand_state():

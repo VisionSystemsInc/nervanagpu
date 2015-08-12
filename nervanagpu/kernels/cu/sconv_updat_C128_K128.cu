@@ -65,7 +65,7 @@ __global__ void __launch_bounds__(256) sconv_updat_C128_K128
     int param_part_PQ
 )
 {
-    __shared__ float share[128*8*4 + 6];
+    __shared__ float share[(128*16 + 32)*4 + 6];
 
     int tid = threadIdx.x;
 

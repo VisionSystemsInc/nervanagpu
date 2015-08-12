@@ -218,6 +218,10 @@ class ConvLayer(Layer):
         self.sizeO  = reduce(mul, self.dimO, 1)
         self.nOut   = reduce(mul, self.MPQ,  1) * K
 
+        # cached transposed view tensors
+        self.F_T = None
+        self.E_T = None
+
         # precompute some multiplications for fast constant memory access
         WN   = W*N
         HWN  = H*WN
@@ -251,15 +255,17 @@ class ConvLayer(Layer):
 
         #TODO: add more 128x128 kernels for better performance at fp32.
         self.fprop_grid = (PQM, grid_K64,  grid_N64)
-        self.bprop_grid = (PQM, grid_C128, grid_N64)
+        self.bprop_grid = (grid_N64, grid_C128, PQM)
         self.fprop_block = (64,  1, 1)
         self.bprop_block = (128, 1, 1)
         self.fprop_size = "K64_N64"
         self.bprop_size = "C128_N64"
 
+        #update_size = "C128_K64"
+
         #TODO: tune this further
-        if  (update_size is None or update_size == "C64_K64" or update_size == "C128_K64") and \
-            (CRST <= 64 or K <= 64 or (K % 64 == 0 and K % 128 != 0)):
+        if  (update_size == "C64_K64" or update_size == "C128_K64") or \
+            (update_size is None and (C <= 64 or K <= 64 or (K % 64 == 0 and K % 128 != 0))):
 
             if self.dtype is np.float32:
                 self.updat_size = "C128_K64"
@@ -271,7 +277,7 @@ class ConvLayer(Layer):
                 updat_block = 64
         else:
             self.updat_size = "C128_K128"
-            updat_grid  = [0, grid_C128, grid_K128]
+            updat_grid  = [0, grid_C128, grid_K128 ]
             updat_block = 256
 
         if grid_P == 0 or grid_Q == 0:
@@ -297,32 +303,36 @@ class ConvLayer(Layer):
             # but maximize the distribution.  This has the effect of better utilizing the L2.
             else:
                 grid_P = P
-                grid_Q = Q // 4
+                if Q > 112:
+                    grid_Q = 4
+                elif Q > 56:
+                    grid_Q = 2
+                else:
+                    grid_Q = 1
 
             # TitanX optimization: make grid multiple of 24 for small grids
             # TODO: explore L2 utilization here:
             # TODO: add 980, 750, etc optimizations
-            if _get_sm_count() == 24:
-                grid_PQ  = grid_P * grid_Q
-                if   grid_PQ < 30:
-                    grid_P = 6
-                    grid_Q = 4
-                elif grid_PQ < 54:
-                    grid_P = 8
-                    grid_Q = 6
-                elif grid_PQ < 78:
-                    grid_P = 9
-                    grid_Q = 8
-                elif grid_PQ <= 108:
-                    grid_P = 12
-                    grid_Q = 8
+            # if _get_sm_count() == 24:
+            #     grid_PQ  = grid_P * grid_Q
+            #     if   grid_PQ < 30:
+            #         grid_P = 6
+            #         grid_Q = 4
+            #     elif grid_PQ < 54:
+            #         grid_P = 8
+            #         grid_Q = 6
+            #     elif grid_PQ < 78:
+            #         grid_P = 9
+            #         grid_Q = 8
+            #     elif grid_PQ <= 108:
+            #         grid_P = 12
+            #         grid_Q = 8
 
         if grid_P >= P: grid_P = P
         if grid_Q >= Q: grid_Q = Q
 
         grid_PQ  = grid_P * grid_Q
         grid_PQM = updat_grid[0] = grid_PQ * M
-
 
         self.updat_grid  = tuple(updat_grid)
         self.updat_block = (updat_block,1,1)

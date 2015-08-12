@@ -1321,6 +1321,50 @@ def call_compound_kernel(rand_state, *args):
 
     return out
 
+
+_transpose_kernel = r"""
+__global__ void transpose(float* out, const float* in, int rows, int cols, int row_strd, int col_strd)
+{
+    __shared__ float tile[32][33];
+ 
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int bx = blockIdx.x;
+    int by = blockIdx.y;
+    int gx = bx * 32 + tx;
+    int gy = by * 32 + ty;
+ 
+    for (int j = 0; j < 32; j += 8)
+    {
+        int gy8 = gy + j;
+        if (gy8 < rows && gx < cols)
+            tile[ty + j][tx] = in[gy8*row_strd + gx*col_strd];
+    }
+    __syncthreads();
+ 
+    gx = by * 32 + tx;
+    gy = bx * 32 + ty;
+ 
+    for (int j = 0; j < 32; j += 8)
+    {
+        int gy8 = gy + j;
+        if (gy8 < cols && gx < rows)
+            out[gy8*rows + gx] = tile[tx][ty + j];
+    }
+}
+"""
+
+
+@context_dependent_memoize
+def _get_transpose_kernel(a_dtype, out_dtype):
+
+    code   = _transpose_kernel
+    module = SourceModule(code)
+    kernel = module.get_function("transpose")
+    kernel.prepare("PPIIII")
+    return kernel
+
+
 _compensated_sum = r"""
 
 %(common)s
@@ -1441,3 +1485,5 @@ def _get_kernel_name():
     names.append(str(caller[1]))
 
     return names
+
+
