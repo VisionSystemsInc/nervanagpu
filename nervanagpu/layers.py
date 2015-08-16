@@ -3,9 +3,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -55,7 +55,7 @@ class Layer(object):
             weights = np.random.normal(loc, scale, self.dimF2)
             self.weights  = self.lib.array(weights,    dtype=self.dtype)
             self.velocity = self.lib.zeros(self.dimF2, dtype=self.dtype)
-            if shared is None: 
+            if shared is None:
                 self.updates = self.lib.empty(self.dimF2, dtype=self.dtype)
             else:
                 self.updates = shared.share(self.dimF2)
@@ -209,6 +209,7 @@ class ConvLayer(Layer):
 
         self.dimI   = (C,D,H,W,N)
         self.dimF   = (C,T,R,S,K)
+        self.dimFb  = (K,T,R,S,C)
         self.dimO   = (K,M,P,Q,N)
         self.dimI2  = (C*D*H*W,N)
         self.dimF2  = (C*T*R*S,K)
@@ -229,6 +230,7 @@ class ConvLayer(Layer):
         RS   = R*S
         RST  = T*RS
         CRST = C*RST
+        KRST = K*RST
         PQ   = P*Q
         PM   = P*M
         PQM  = M*PQ
@@ -236,7 +238,7 @@ class ConvLayer(Layer):
         PQN  = P*QN
         MPQN = M*PQN
 
-        # I can easily get the kernels working with larger values here.. 
+        # I can easily get the kernels working with larger values here..
         # But this is what version 1 is coded to support.
         assert PQM < 2**16, "Integer division is faster with 16bit numerators"
 
@@ -349,7 +351,7 @@ class ConvLayer(Layer):
         # generate the convolution kernel args for fprop and bprop
         self.kernel_args = _flatten([
             N, K, D, H, W, WN, HWN, DHWN,
-            C, CRST, RST, magic_RST, RS, magic_RS, S, magic_S,
+            C, KRST, RST, magic_RST, RS, magic_RS, S, magic_S,
             pad_d, pad_h, pad_w, str_d, str_h, str_w,
             P, Q, PQ, QN, PQN, MPQN, magic_Q, magic_PQ,
             grid_P, grid_Q, grid_PQ])
@@ -363,10 +365,17 @@ class ConvLayer(Layer):
             grid_P, grid_Q, grid_PQ])
 
         # shared lookup table size
-        self.lut_size = (RST // 32 + (RST  % 32 != 0)) * 32 * 4
+        self.lut_size = (RST // 32 + (RST  % 32 != 0)) * 32 * 4 * 2
 
         # flop count for benchmarking
         self.flops    = PQM * K * N * CRST * 2.0
+
+        # generate the kernel args for dim shuffling C<=>K for bprop
+        self.RST = RST
+        self.shuffle_args = _flatten([
+            RST*K, RS*K, S*K, K,
+            RST*C, RS*C, S*C, C,
+            RS, magic_RS, S, magic_S])
 
     def fprop(self):
             self.lib.fprop_conv(self, self.fprop_in, self.weights, self.fprop_out, relu=True)

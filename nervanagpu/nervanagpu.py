@@ -19,7 +19,7 @@ import pycuda.driver as drv
 from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
-from .float_ew import call_compound_kernel, _get_compensated_sum_kernel, _get_fast_ew_dims, _get_transpose_kernel
+from .float_ew import call_compound_kernel, _get_compensated_sum_kernel, _get_fast_ew_dims, _get_transpose_kernel, _get_shuffle_kernel
 from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 
 if sys.version_info >= (3, 0):
@@ -675,6 +675,28 @@ class NervanaGPU(object):
             print("%7.3f msecs %8.3f gflops (%s: %s) size:%s grid:%s" %
                   (msecs, gflops, op, layer, size, grid))
 
+    def conv_shuffle_filter(self, layer, F, out, repeat=1):
+
+        gridX   = (layer.K >> 5) + (layer.K & 31 != 0)
+        gridY   = (layer.C >> 5) + (layer.C & 31 != 0)
+        kernel  = _get_shuffle_kernel(F.dtype.str)
+
+        if self.bench or repeat > 1:
+            start, end = _get_events()
+            start.record(self.stream)
+
+        #import ipdb; ipdb.set_trace()
+        for r in range(repeat):
+            kernel.prepared_async_call(
+                (gridX,gridY,layer.RST), (32,8,1), self.stream, 
+                out.gpudata,  F.gpudata, *layer.shuffle_args)
+
+        if self.bench or repeat > 1:
+            end.record(self.stream)
+            end.synchronize()
+            msecs = end.time_since(start) / repeat
+            print("%7.3f msecs (shuffle_filter) grid:(%d,%d)" % (msecs,gridX,gridY))
+
     def pool_layer(self, dtype,
             op, N, C,
             D=1, H=1, W=1,
@@ -1075,6 +1097,8 @@ class NervanaGPU(object):
             end.synchronize()
             msecs = end.time_since(start) / repeat
             print("%7.3f msecs (transpose: %s => %s) grid:(%d,%d)" % (msecs,reshape,reshape[::-1],gridX,gridY))
+
+
 
     def compensated_sum(self, sum_tensor, cmp_tensor, add_tensor, cmp_scale=1.0, add_scale=1.0):
 

@@ -1365,6 +1365,60 @@ def _get_transpose_kernel(a_dtype, out_dtype):
     return kernel
 
 
+_shuffle_kernel = r"""
+__global__ void dimShuffle(
+    float* out, const float* in, 
+    int TRSK, int RSK, int SK, int K, 
+    int TRSC, int RSC, int SC, int C,
+    int RS, int magic_RS, int shift_RS, 
+    int S,  int magic_S,  int shift_S)
+{
+    __shared__ float tile[32][33];
+ 
+    int tx  = threadIdx.x;
+    int ty  = threadIdx.y;
+    int bk  = blockIdx.x;
+    int bc  = blockIdx.y;
+    int trs = blockIdx.z;
+
+    int k  = bk * 32 + tx;
+    int c  = bc * 32 + ty;
+
+    int t  = magic_RS * trs; t >>= shift_RS;
+    int rs = trs - t*RS;
+
+    int r = magic_S * rs; r >>= shift_S;
+    int s = rs - r*S;
+
+    for (int j = 0; j < 32; j += 8)
+    {
+        int cj = c + j;
+        if (cj < C && k < K)
+            tile[ty + j][tx] = in[ cj*TRSK + t*RSK + r*SK + s*K + k ];
+    }
+    __syncthreads();
+
+    k = bk * 32 + ty;
+    c = bc * 32 + tx;
+ 
+    for (int i = 0; i < 32; i += 8)
+    {
+        int ki = k + i;
+        if (ki < K && c < C)
+            out[ ki*TRSC + t*RSC + r*SC + s*C + c ] = tile[tx][ty + i];
+    }
+}
+"""
+
+@context_dependent_memoize
+def _get_shuffle_kernel(dtype):
+
+    code   = _shuffle_kernel
+    module = SourceModule(code)
+    kernel = module.get_function("dimShuffle")
+    kernel.prepare("PPIIIIIIIIIIIIII")
+    return kernel
+
 _compensated_sum = r"""
 
 %(common)s
