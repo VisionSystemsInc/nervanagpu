@@ -3,9 +3,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -94,7 +94,7 @@ $(foreach w,$(WIDTHS), \
 
 CONV_TYPES := _fprop _bprop _updat
 CONV_CODES := _ # _s8_ _u8_
-CONV_SIZES := C64_N64 C64_K64 K64_N64 C128_N64 C128_K64 C128_K128
+CONV_SIZES := C64_N64 K64_N64 C64_K64 C128_K64 C128_K128
 $(foreach w,$(WIDTHS), \
   $(foreach t,$(CONV_TYPES), \
     $(foreach c,$(CONV_CODES), \
@@ -172,7 +172,7 @@ html: doc
 test: kernels
 	@echo "Running unit tests..."
 	nosetests $(NOSE_ATTRS) $(NOSE_FLAGS) nervanagpu
-        
+
 bench: python
 	@for t in $(TEST_FILES) ; do \
 		echo "Running $$t..." ; \

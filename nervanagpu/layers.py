@@ -219,11 +219,9 @@ class ConvLayer(Layer):
         self.sizeO  = reduce(mul, self.dimO, 1)
         self.nOut   = reduce(mul, self.MPQ,  1) * K
 
-        # cached transposed view tensors
-        self.F_T = None
-        self.E_T = None
-
         # precompute some multiplications for fast constant memory access
+        HW   = H*W
+        DHW  = D*HW
         WN   = W*N
         HWN  = H*WN
         DHWN = D*HWN
@@ -240,28 +238,27 @@ class ConvLayer(Layer):
 
         # I can easily get the kernels working with larger values here..
         # But this is what version 1 is coded to support.
-        assert PQM < 2**16, "Integer division is faster with 16bit numerators"
-
-        # Kernels can be recoded to support 32bit numerators at
-        # some performance loss.
-        assert CRST+8 < 2**16, "Integer division is faster with 16bit numerators"
+        assert PQM  < 2**16, "Integer division is faster with 16bit numerators"
+        assert DHW  < 2**16, "Integer division is faster with 16bit numerators"
+        assert CRST < 2**16, "Integer division is faster with 16bit numerators"
 
         # precompute grid dimensions
-        grid_N64  = N    // 64 + (N    % 64 != 0)
-        grid_K64  = K    // 64 + (K    % 64 != 0)
-        grid_C64  = CRST // 64 + (CRST % 64 != 0)
+        grid_N64     = N    //  64 + (N    %  64 != 0)
+        grid_K64     = K    //  64 + (K    %  64 != 0)
+        grid_C64     = C    //  64 + (C    %  64 != 0)
+        grid_CRST64  = CRST //  64 + (CRST %  64 != 0)
 
-        grid_N128 = N    // 128 + (N    % 128 != 0)
-        grid_K128 = K    // 128 + (K    % 128 != 0)
-        grid_C128 = CRST // 128 + (CRST % 128 != 0)
+        grid_N128    = N    // 128 + (N    % 128 != 0)
+        grid_K128    = K    // 128 + (K    % 128 != 0)
+        grid_CRST128 = CRST // 128 + (CRST % 128 != 0)
 
         #TODO: add more 128x128 kernels for better performance at fp32.
         self.fprop_grid = (PQM, grid_K64,  grid_N64)
-        self.bprop_grid = (grid_N64, grid_C128, PQM)
-        self.fprop_block = (64,  1, 1)
-        self.bprop_block = (128, 1, 1)
+        self.bprop_grid = (DHW, grid_C64,  grid_N64)
+        self.fprop_block = (64, 1, 1)
+        self.bprop_block = (64, 1, 1)
         self.fprop_size = "K64_N64"
-        self.bprop_size = "C128_N64"
+        self.bprop_size = "C64_N64"
 
         #update_size = "C128_K64"
 
@@ -271,15 +268,15 @@ class ConvLayer(Layer):
 
             if self.dtype is np.float32:
                 self.updat_size = "C128_K64"
-                updat_grid  = [0, grid_C128, grid_K64]
+                updat_grid  = [0, grid_CRST128, grid_K64]
                 updat_block = 128
             else:
                 self.updat_size = "C64_K64"
-                updat_grid  = [0, grid_C64, grid_K64]
+                updat_grid  = [0, grid_CRST64, grid_K64]
                 updat_block = 64
         else:
             self.updat_size = "C128_K128"
-            updat_grid  = [0, grid_C128, grid_K128 ]
+            updat_grid  = [0, grid_CRST128, grid_K128 ]
             updat_block = 256
 
         if grid_P == 0 or grid_Q == 0:
@@ -340,21 +337,32 @@ class ConvLayer(Layer):
         self.updat_block = (updat_block,1,1)
 
         # precompute the magic numbers and shift amounts for integer division
-        magic_RST = _magic32(CRST+8, RST)
-        magic_RS  = _magic32(RST+32, RS)
-        magic_S   = _magic32(RS+32,  S)
-        magic_PQ  = _magic32(PQM, PQ)
-        magic_Q   = _magic32(PQ,  Q)
-        magic_PQu = _magic32(grid_PQM, grid_PQ)
-        magic_Qu  = _magic32(grid_PQ,  grid_Q)
+        magic_RST   = _magic32(CRST,   RST)
+        magic_RS    = _magic32(RST+32, RS)
+        magic_S     = _magic32(RS+32,  S)
+        magic_PQ    = _magic32(PQM, PQ)
+        magic_Q     = _magic32(PQ,  Q)
+        magic_PQu   = _magic32(grid_PQM, grid_PQ)
+        magic_Qu    = _magic32(grid_PQ,  grid_Q)
+        magic_str_w = _magic32(W + S - pad_w - 2, str_w)
+        magic_str_h = _magic32(H + R - pad_h - 2, str_h)
+        magic_str_d = _magic32(D + T - pad_d - 2, str_d)
+        magic_HW    = _magic32(DHW, HW)
+        magic_W     = _magic32(HW,  W)
 
         # generate the convolution kernel args for fprop and bprop
-        self.kernel_args = _flatten([
+        self.fprop_args = _flatten([
             N, K, D, H, W, WN, HWN, DHWN,
-            C, KRST, RST, magic_RST, RS, magic_RS, S, magic_S,
+            C, KRST, RST, RS, magic_RS, S, magic_S,
             pad_d, pad_h, pad_w, str_d, str_h, str_w,
-            P, Q, PQ, QN, PQN, MPQN, magic_Q, magic_PQ,
-            grid_P, grid_Q, grid_PQ])
+            Q, PQ, QN, PQN, MPQN, magic_Q, magic_PQ ])
+
+        self.bprop_args = _flatten([
+            N, C, M, P, Q, QN, PQN, MPQN,
+            K, CRST, RST, RS, magic_RS, S, magic_S,
+            pad_d, pad_h, pad_w, str_d, str_h, str_w,
+            W, HW, WN, HWN, DHWN, magic_W, magic_HW,
+            R, T, magic_str_w, magic_str_h, magic_str_d ])
 
         # update uses slightly different args
         self.update_args = _flatten([
@@ -365,17 +373,22 @@ class ConvLayer(Layer):
             grid_P, grid_Q, grid_PQ])
 
         # shared lookup table size
-        self.lut_size = (RST // 32 + (RST  % 32 != 0)) * 32 * 4 * 2
+        self.lut_size = RST * 4 * 2
 
         # flop count for benchmarking
         self.flops    = PQM * K * N * CRST * 2.0
 
         # generate the kernel args for dim shuffling C<=>K for bprop
-        self.RST = RST
         self.shuffle_args = _flatten([
             RST*K, RS*K, S*K, K,
             RST*C, RS*C, S*C, C,
             RS, magic_RS, S, magic_S])
+
+        gridX = (K >> 5) + (K & 31 != 0)
+        gridY = (C >> 5) + (C & 31 != 0)
+        self.shuffle_grid  = (gridX,gridY,RST)
+        self.shuffle_block = (32,8,1)
+
 
     def fprop(self):
             self.lib.fprop_conv(self, self.fprop_in, self.weights, self.fprop_out, relu=True)

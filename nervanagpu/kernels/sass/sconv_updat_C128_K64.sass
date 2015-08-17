@@ -5,9 +5,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,54 +20,52 @@
     szShareI  : (128*16 + 32)
     szShareE  : (64*16  + 32)
 
-    param_Rand[0]      : c[0x0][0x140]
-    param_Rand[1]      : c[0x0][0x144]
-    param_F[0]         : c[0x0][0x148]
-    param_F[1]         : c[0x0][0x14c]
-    param_I[0]         : c[0x0][0x150]
-    param_I[1]         : c[0x0][0x154]
-    param_E[0]         : c[0x0][0x158]
-    param_E[1]         : c[0x0][0x15c]
-    param_alpha        : c[0x0][0x160]
-    param_flags        : c[0x0][0x164]
-    param_N            : c[0x0][0x168]
-    param_K            : c[0x0][0x16c]
-    param_D            : c[0x0][0x170]
-    param_H            : c[0x0][0x174]
-    param_W            : c[0x0][0x178]
-    param_WN           : c[0x0][0x17c]
-    param_HWN          : c[0x0][0x180]
-    param_DHWN         : c[0x0][0x184]
-    param_C            : c[0x0][0x188]
-    param_CRST         : c[0x0][0x18c]
-    param_RST          : c[0x0][0x190]
-    param_magic_RST    : c[0x0][0x194]
-    param_shift_RST    : c[0x0][0x198]
-    param_RS           : c[0x0][0x19c]
-    param_magic_RS     : c[0x0][0x1a0]
-    param_shift_RS     : c[0x0][0x1a4]
-    param_S            : c[0x0][0x1a8]
-    param_magic_S      : c[0x0][0x1ac]
-    param_shift_S      : c[0x0][0x1b0]
-    param_pad_d        : c[0x0][0x1b4]
-    param_pad_h        : c[0x0][0x1b8]
-    param_pad_w        : c[0x0][0x1bc]
-    param_str_d        : c[0x0][0x1c0]
-    param_str_h        : c[0x0][0x1c4]
-    param_str_w        : c[0x0][0x1c8]
-    param_P            : c[0x0][0x1cc]
-    param_Q            : c[0x0][0x1d0]
-    param_PQ           : c[0x0][0x1d4]
-    param_QN           : c[0x0][0x1d8]
-    param_PQN          : c[0x0][0x1dc]
-    param_MPQN         : c[0x0][0x1e0]
-    param_magic_Q      : c[0x0][0x1e4]
-    param_shift_Q      : c[0x0][0x1e8]
-    param_magic_PQ     : c[0x0][0x1ec]
-    param_shift_PQ     : c[0x0][0x1f0]
-    param_grid_P       : c[0x0][0x1f4]
-    param_grid_Q       : c[0x0][0x1f8]
-    param_grid_PQ      : c[0x0][0x1fc]
+    param_F[0]         : c[0x0][0x140]
+    param_F[1]         : c[0x0][0x144]
+    param_I[0]         : c[0x0][0x148]
+    param_I[1]         : c[0x0][0x14c]
+    param_E[0]         : c[0x0][0x150]
+    param_E[1]         : c[0x0][0x154]
+    param_alpha        : c[0x0][0x158]
+    param_flags        : c[0x0][0x15c]
+    param_N            : c[0x0][0x160]
+    param_K            : c[0x0][0x164]
+    param_D            : c[0x0][0x168]
+    param_H            : c[0x0][0x16c]
+    param_W            : c[0x0][0x170]
+    param_WN           : c[0x0][0x174]
+    param_HWN          : c[0x0][0x178]
+    param_DHWN         : c[0x0][0x17c]
+    param_C            : c[0x0][0x180]
+    param_CRST         : c[0x0][0x184]
+    param_RST          : c[0x0][0x188]
+    param_magic_RST    : c[0x0][0x18c]
+    param_shift_RST    : c[0x0][0x190]
+    param_RS           : c[0x0][0x194]
+    param_magic_RS     : c[0x0][0x198]
+    param_shift_RS     : c[0x0][0x19c]
+    param_S            : c[0x0][0x1a0]
+    param_magic_S      : c[0x0][0x1a4]
+    param_shift_S      : c[0x0][0x1a8]
+    param_pad_d        : c[0x0][0x1ac]
+    param_pad_h        : c[0x0][0x1b0]
+    param_pad_w        : c[0x0][0x1b4]
+    param_str_d        : c[0x0][0x1b8]
+    param_str_h        : c[0x0][0x1bc]
+    param_str_w        : c[0x0][0x1c0]
+    param_P            : c[0x0][0x1c4]
+    param_Q            : c[0x0][0x1c8]
+    param_PQ           : c[0x0][0x1cc]
+    param_QN           : c[0x0][0x1d0]
+    param_PQN          : c[0x0][0x1d4]
+    param_MPQN         : c[0x0][0x1d8]
+    param_magic_Q      : c[0x0][0x1dc]
+    param_shift_Q      : c[0x0][0x1e0]
+    param_magic_PQ     : c[0x0][0x1e4]
+    param_shift_PQ     : c[0x0][0x1e8]
+    param_grid_P       : c[0x0][0x1ec]
+    param_grid_Q       : c[0x0][0x1f0]
+    param_grid_PQ      : c[0x0][0x1f4]
 </CONSTANT_MAPPING>
 
 <REGISTER_MAPPING>
@@ -213,7 +211,7 @@ NEXT_PQ:
 --:-:-:-:1      XMAD.LO2 r1, magic_S, rst1, RZ;
 --:-:-:-:1      SHR.U32  r1, r1, param_shift_S;
 --:-:-:-:1      VMAD.U16.U16 s1, -r1, S, rst1;
-// mt = m * w - pad_d 
+// mt = m * w - pad_d
 // pr = p * u - pad_h
 // qs = q * v - pad_w
 --:-:-:-:1      VMAD.U16.U16 mt, m, str_d, -pad_d;
@@ -331,7 +329,7 @@ NEXT_16N:
         j1c18  => "--:-:-:-:1  \@P0 STS [writeIs + 4x< 9*128 +  0 + 16>], load0I13;\n",
         j1c20  => "--:-:-:-:1  \@P0 STS [writeIs + 4x<10*128 +  0 + 16>], load0I14;\n",
         j1c22  => "--:-:-:-:1  \@P0 STS [writeIs + 4x<11*128 +  0 + 16>], load0I15;\n",
- 
+
         j2c8   => "02:-:-:-:1 \@!P0 STS [writeIs + 4x< 0*128 +  0 +  0>], load0I00;\n",
         j2c10  => "--:-:-:-:1 \@!P0 STS [writeIs + 4x< 1*128 +  0 +  0>], load0I01;\n",
         j2c12  => "--:-:-:-:1 \@!P0 STS [writeIs + 4x< 2*128 +  0 +  0>], load0I02;\n",
@@ -340,7 +338,7 @@ NEXT_16N:
         j2c18  => "--:-:-:-:1 \@!P0 STS [writeIs + 4x< 9*128 +  0 + 16>], load0I05;\n",
         j2c20  => "--:-:-:-:1 \@!P0 STS [writeIs + 4x<10*128 +  0 + 16>], load0I06;\n",
         j2c22  => "--:2:-:-:1 \@!P0 STS [writeIs + 4x<11*128 +  0 + 16>], load0I07;\n",
- 
+
         j2c24  => "--:-:-:-:1      ISETP.NE.AND P2, PT, track0I0, -1, P1;\n",
         j2c26  => "--:-:-:-:1      ISETP.EQ.AND P3, PT, track0I0, -1, P1;\n",
 
@@ -353,7 +351,7 @@ NEXT_16N:
         j4c10  => "--:-:-:-:1  \@P3 LDS.U.128 load0I04, [addr_zero];\n",
         j5c8   => "--:-:-:-:1  \@P3 LDS.U.128 load0I08, [addr_zero];\n",
         j5c10  => "--:-:-:-:1  \@P3 LDS.U.128 load0I12, [addr_zero];\n",
-        
+
         j5c57  => "10:-:-:-:1  \@P2 IADD   track0I0.CC, track0I0, 4x<32>;\n",
         j5c62  => "--:-:-:-:1  \@P2 IADD.X track0I1,    track0I1, RZ;\n",
 
@@ -374,7 +372,7 @@ NEXT_16N:
         j7c18  => "--:-:-:-:1 \@!P0 STS [writeIs + 4x< 9*128 + 64 + 16>], load1I05;\n",
         j7c20  => "--:-:-:-:1 \@!P0 STS [writeIs + 4x<10*128 + 64 + 16>], load1I06;\n",
         j7c22  => "--:3:-:-:1 \@!P0 STS [writeIs + 4x<11*128 + 64 + 16>], load1I07;\n",
- 
+
         j7c24  => "--:-:-:-:1      ISETP.NE.AND P2, PT, track1I0, -1, P1;\n",
         j7c26  => "--:-:-:-:1      ISETP.EQ.AND P3, PT, track1I0, -1, P1;\n",
 
@@ -409,9 +407,9 @@ NEXT_16N:
         j12c18  => "--:-:-:-:1 \@!P0 STS [writeEs + 4x< 9*64 + 16>], loadE05;\n",
         j12c20  => "--:-:-:-:1 \@!P0 STS [writeEs + 4x<10*64 + 16>], loadE06;\n",
         j12c22  => "--:4:-:-:1 \@!P0 STS [writeEs + 4x<11*64 + 16>], loadE07;\n",
- 
+
         j12c24  => "--:-:-:-:1      ISETP.LT.AND P2, PT, k, param_K,  P1;\n",
- 
+
         j13c8   => "08:-:-:-:1  \@P2 LDG.E.CI.128 loadE00, [trackE + 4x< 0>];\n",
         j13c10  => "--:-:-:-:1  \@P2 LDG.E.CI.128 loadE04, [trackE + 4x< 8>];\n",
         j13c12  => "--:-:-:-:1  \@P2 LDG.E.CI.128 loadE08, [trackE + 4x<16>];\n",
@@ -433,12 +431,12 @@ NEXT_16N:
                   "--:-:-:-:1      IADD writeIs, writeIs, swapBuf;\n" .
                   "--:-:-:-:1      IADD swapBuf, RZ,     -swapBuf;\n",
 
-        j15c63 => "--:-:-:Y:5  \@P0 BRA.U NEXT_16N;\n" . 
-                  "--:-:-:-:0  \@P5 IADD q, q, param_grid_Q;\n" . 
+        j15c63 => "--:-:-:Y:5  \@P0 BRA.U NEXT_16N;\n" .
+                  "--:-:-:-:0  \@P5 IADD q, q, param_grid_Q;\n" .
                   "01:-:-:Y:5  \@P5 BRA.U NEXT_PQ;\n" .
-                  "--:-:-:-:1  \@P6 MOV  q, qq;\n" . 
-                  "--:-:-:-:0  \@P6 IADD p, p, param_grid_P;\n" . 
-                  "--:-:-:Y:5  \@P6 BRA.U NEXT_PQ;\n" . 
+                  "--:-:-:-:1  \@P6 MOV  q, qq;\n" .
+                  "--:-:-:-:0  \@P6 IADD p, p, param_grid_P;\n" .
+                  "--:-:-:Y:5  \@P6 BRA.U NEXT_PQ;\n" .
                   "--:-:-:Y:5      BRA.U FINISH;\n",
     );
 
@@ -632,9 +630,9 @@ FINISH:
 --:-:-:-:1      MOV alpha, param_alpha;
 
 // kk < K
---:-:-:-:1      ISETP.LT.AND P5, PT, kk, param_K, PT; 
+--:-:-:-:1      ISETP.LT.AND P5, PT, kk, param_K, PT;
 --:-:-:-:1      IADD kk, kk, 32;
---:-:-:-:1      ISETP.LT.AND P6, PT, kk, param_K, PT; 
+--:-:-:-:1      ISETP.LT.AND P6, PT, kk, param_K, PT;
 
 </SCHEDULE_BLOCK>
 

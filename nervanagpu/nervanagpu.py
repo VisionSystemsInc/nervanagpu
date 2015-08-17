@@ -113,7 +113,7 @@ class GPUTensor(object):
     @property
     @memoize_method
     def is_contiguous(self):
-        return not self.take_array and self.strides == _contiguous_strides(self.shape) 
+        return not self.take_array and self.strides == _contiguous_strides(self.shape)
 
     def set(self, ary):
         """
@@ -208,7 +208,7 @@ class GPUTensor(object):
 
             # Fancy indexing
             elif isinstance(index_entry, (GPUTensor, np.ndarray, list, tuple)):
-                
+
                 if isinstance(index_entry, (list, tuple)):
                     index_entry = np.array(index_entry, dtype=np.int32)
 
@@ -407,7 +407,7 @@ class GPUTensor(object):
             shape   = self.shape[::-1]
             strides = self.strides[::-1]
         else:
-            # support for batched dot. 
+            # support for batched dot.
             # perserve outer dimension but reverse inner dims
             shape   = list(self.shape[::-1])
             strides = list(self.strides[::-1])
@@ -490,14 +490,6 @@ class NervanaGPU(object):
         self.bench = bench
         self.stream = None
         self.default_dtype = default_dtype
-
-    def scratch_tensor(self, shape, dtype):
-
-        data   = _get_scratch_data(self.scratch_size)
-        tensor = GPUTensor(self, shape, dtype, gpudata=data, name="scratch")
-        if tensor.size > self.scratch_size:
-            raise ValueError("increase scratch_size")
-        return tensor
 
     def empty(self, shape, dtype=None, name=None, allocator=drv.mem_alloc):
         """
@@ -605,7 +597,7 @@ class NervanaGPU(object):
 
         return self._execute_conv(
             layer, "fprop", layer.fprop_size,
-            layer.fprop_grid, layer.fprop_block, layer.kernel_args, layer.lut_size,
+            layer.fprop_grid, layer.fprop_block, layer.fprop_args, layer.lut_size,
             I, F, O, alpha, relu, False, repeat)
 
     def bprop_conv(self, layer, F, E, grad_I, alpha=1.0, repeat=1):
@@ -614,15 +606,10 @@ class NervanaGPU(object):
         assert layer.sizeO == E.size
         assert layer.sizeI == grad_I.size
 
-        if layer.F_T is None:
-            layer.F_T = self.scratch_tensor(layer.dimF2[::-1], F.dtype)
-            
-        self.transpose(F, layer.F_T, reshape=layer.dimF2)
-
         return self._execute_conv(
             layer, "bprop", layer.bprop_size,
-            layer.bprop_grid, layer.bprop_block, layer.kernel_args, layer.lut_size,
-            layer.F_T, E, grad_I, alpha, False, True, repeat)
+            layer.bprop_grid, layer.bprop_block, layer.bprop_args, layer.lut_size,
+            E, F, grad_I, alpha, False, False, repeat)
 
     def update_conv(self, layer, I, E, grad_F, alpha=1.0, repeat=1):
 
@@ -638,21 +625,27 @@ class NervanaGPU(object):
     def _execute_conv(self, layer, op, size, grid, block, args, shared, A, B, C, alpha, relu, zero, repeat):
 
         assert B.dtype == C.dtype
+        assert A.dtype == C.dtype
 
         clss  = "hconv" if C.dtype.type is np.float16 else "sconv"
-        if   A.dtype.type is np.uint8: op += '_u8'
-        elif A.dtype.type is np.int8:  op += '_s8'
-        else: assert A.dtype == C.dtype
 
         flags = 0
-        if C.rounding: flags |= 1 | (C.rounding << 16)
-        if relu:       flags |= 2
+        if relu: flags |= 2
+
+        if op == "bprop":
+            assert  B.size < self.scratch_size
+            B_gpudata      = _get_scratch_data(self.scratch_size)
+            shuffle_kernel = _get_shuffle_kernel(A.dtype.str)
+            shuffle_args   = [ layer.shuffle_grid, layer.shuffle_block, self.stream,
+                               B_gpudata, B.gpudata ] + layer.shuffle_args
+        else:
+            B_gpudata      = B.gpudata
+            shuffle_kernel = None
 
         kernel = _get_conv_kernel(self.cubin_path, clss, op, size)
-        params = [grid, block, self.stream, _get_rand_state(),
-                  C.gpudata, A.gpudata, B.gpudata,
-                  alpha, flags ]
-        params.extend(args)
+        params = [ grid, block, self.stream,
+                   C.gpudata, A.gpudata, B_gpudata,
+                   alpha, flags ] + args
 
         # Warmup
         if repeat > 1:
@@ -664,7 +657,12 @@ class NervanaGPU(object):
             start.record(stream=self.stream)
 
         for r in range(repeat):
-            if zero: C.fill(0.0)
+            if zero:
+                C.fill(0.0)
+
+            if shuffle_kernel:
+                shuffle_kernel.prepared_async_call(*shuffle_args)
+
             kernel.prepared_async_call(*params, shared_size=shared)
 
         if self.bench or repeat > 1:
@@ -674,28 +672,6 @@ class NervanaGPU(object):
             gflops = layer.flops / (msecs * 1000000.0)
             print("%7.3f msecs %8.3f gflops (%s: %s) size:%s grid:%s" %
                   (msecs, gflops, op, layer, size, grid))
-
-    def conv_shuffle_filter(self, layer, F, out, repeat=1):
-
-        gridX   = (layer.K >> 5) + (layer.K & 31 != 0)
-        gridY   = (layer.C >> 5) + (layer.C & 31 != 0)
-        kernel  = _get_shuffle_kernel(F.dtype.str)
-
-        if self.bench or repeat > 1:
-            start, end = _get_events()
-            start.record(self.stream)
-
-        #import ipdb; ipdb.set_trace()
-        for r in range(repeat):
-            kernel.prepared_async_call(
-                (gridX,gridY,layer.RST), (32,8,1), self.stream, 
-                out.gpudata,  F.gpudata, *layer.shuffle_args)
-
-        if self.bench or repeat > 1:
-            end.record(self.stream)
-            end.synchronize()
-            msecs = end.time_since(start) / repeat
-            print("%7.3f msecs (shuffle_filter) grid:(%d,%d)" % (msecs,gridX,gridY))
 
     def pool_layer(self, dtype,
             op, N, C,
@@ -857,7 +833,7 @@ class NervanaGPU(object):
                 size = 32
 
         if m >= n:
-            if op == "nt": 
+            if op == "nt":
                 size = 128
             sizeA, sizeB = (128,size)
         else:
@@ -865,7 +841,7 @@ class NervanaGPU(object):
                 size = 128
             # temp till I can write these kernels (coming soon)
             elif size == 64:
-                size = 32 
+                size = 32
             sizeA, sizeB = (size,128)
 
         gridA   = m // sizeA + (m % sizeA != 0)
@@ -952,7 +928,7 @@ class NervanaGPU(object):
         else:
             opB = 'n'
             ldb *= 8 * B.dtype.itemsize # saves a kernel register
-        
+
         op  = opA + opB
         assert op != "tt"
 
@@ -997,7 +973,7 @@ class NervanaGPU(object):
 
             # match the kernel to the optimal short size but avoid not implemented kernels
             if m >= n:
-                if op == "nt": 
+                if op == "nt":
                     size = 128
                 sizeA, sizeB = (128,size)
             else:
@@ -1005,7 +981,7 @@ class NervanaGPU(object):
                     size = 128
                 # temp till I can write these kernels (coming soon)
                 elif size == 64:
-                    size = 32 
+                    size = 32
                 sizeA, sizeB = (size,128)
 
             size = "%dx%d" % (sizeA,sizeB)
@@ -1087,8 +1063,8 @@ class NervanaGPU(object):
 
         for r in range(repeat):
             kernel.prepared_async_call(
-                (gridX,gridY,1), (32,8,1), self.stream, 
-                out.gpudata,  a.gpudata, 
+                (gridX,gridY,1), (32,8,1), self.stream,
+                out.gpudata,  a.gpudata,
                 reshape[0],   reshape[1],
                 strides[0],   strides[1])
 
@@ -1118,8 +1094,8 @@ class NervanaGPU(object):
         kernel.prepared_async_call(
             (shape[0],1,1), (32,1,1), self.stream, _get_rand_state(),
             sum_tensor.gpudata, cmp_tensor.gpudata, add_tensor.gpudata,
-            cmp_scale, add_scale, 
-            strides[0], strides[1], 
+            cmp_scale, add_scale,
+            strides[0], strides[1],
             shape[1], sum_tensor.rounding)
 
     def add         (self, a, b, out=None): return OpTreeNode.build("add", a, b, out=out)
@@ -1362,12 +1338,18 @@ def _get_gemm_kernel(path, clss, op, size):
     #print("Loaded: ", kernel)
     return func
 
+_conv_sig = {
+    "fprop" : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+    "bprop" : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+    "updat" : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+}
+
 @context_dependent_memoize
 def _get_conv_kernel(path, clss, op, size):
     module = _get_module(path, clss, op, size)
     kernel = "{0}_{1}_{2}".format(clss, op, size)
     func   = module.get_function(kernel)
-    func.prepare("PPPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII")
+    func.prepare(_conv_sig[op])
     #print("Loaded: ", kernel)
     return func
 
