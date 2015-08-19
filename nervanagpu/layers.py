@@ -260,9 +260,13 @@ class ConvLayer(Layer):
         self.fprop_size = "K64_N64"
         self.bprop_size = "C64_N64"
 
+        # in float32 the smaller kernel is actually faster in the larger feature maps
+        if update_size is None and np.dtype(dtype).type is np.float32 and Q > 56:
+            update_size = "C128_K64"
+
         #TODO: tune this further
         if  (update_size == "C128_K64") or \
-            (update_size is None and (Q > 56 or K <= 64 or (K % 64 == 0 and K % 128 != 0))):
+            (update_size is None and (K <= 64 or (K % 64 == 0 and K % 128 != 0))):
 
             self.updat_size = "C128_K64"
             updat_grid  = [0, grid_CRST128, grid_K64]

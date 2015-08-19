@@ -1378,13 +1378,13 @@ def _get_transpose_kernel(a_dtype, out_dtype):
 
 _shuffle_kernel = r"""
 __global__ void dimShuffle(
-    float* out, const float* in,
+    %(type)s* out, const %(type)s* in,
     int TRSK, int RSK, int SK, int K,
     int TRSC, int RSC, int SC, int C,
     int RS, int magic_RS, int shift_RS,
     int S,  int magic_S,  int shift_S)
 {
-    __shared__ float tile[32][33];
+    __shared__ %(type)s tile[32][33];
 
     int tx  = threadIdx.x;
     int ty  = threadIdx.y;
@@ -1424,7 +1424,7 @@ __global__ void dimShuffle(
 @context_dependent_memoize
 def _get_shuffle_kernel(dtype):
 
-    code   = _shuffle_kernel
+    code   = _shuffle_kernel % _ew_types[dtype]
     module = SourceModule(code)
     kernel = module.get_function("dimShuffle")
     kernel.prepare("PPIIIIIIIIIIIIII")

@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *    http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,10 +19,9 @@
 extern "C"
 __global__ void __launch_bounds__(64) hconv_fprop_K64_N64
 (
-    short* param_Rand,
-    short* param_O,
-    const short* param_I,
-    const short* param_F,
+    unsigned short*        param_O,
+    const unsigned short*  param_I,
+    const unsigned short*  param_F,
     float param_alpha,
     int param_flags,
     int param_N,
@@ -36,8 +35,6 @@ __global__ void __launch_bounds__(64) hconv_fprop_K64_N64
     int param_C,
     int param_CRST,
     int param_RST,
-    int param_magic_RST,
-    int param_shift_RST,
     int param_RS,
     int param_magic_RS,
     int param_shift_RS,
@@ -50,7 +47,6 @@ __global__ void __launch_bounds__(64) hconv_fprop_K64_N64
     int param_str_d,
     int param_str_h,
     int param_str_w,
-    int param_P,
     int param_Q,
     int param_PQ,
     int param_QN,
@@ -59,10 +55,7 @@ __global__ void __launch_bounds__(64) hconv_fprop_K64_N64
     int param_magic_Q,
     int param_shift_Q,
     int param_magic_PQ,
-    int param_shift_PQ,
-    int param_part_P,
-    int param_part_Q,
-    int param_part_PQ
+    int param_shift_PQ
 )
 {
     __shared__ float share[64*8*4 + 8];

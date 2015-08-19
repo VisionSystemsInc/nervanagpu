@@ -470,7 +470,7 @@ class NervanaGPU(object):
 
     def __init__(self, stochastic_round=False, bench=False,
                  cubin_path=os.path.join("kernels", "cubin"),
-                 scratch_size=9*512*512, default_dtype=np.float16):
+                 scratch_size=9*1024*1024, default_dtype=np.float16):
         """
         NervanaGPU: the primary interface class and factory for GPUTensors
 
@@ -639,7 +639,7 @@ class NervanaGPU(object):
         if   op == "bprop":
             assert B.size <= self.scratch_size
             B_gpudata      = _get_scratch_data(self.scratch_size)
-            shuffle_kernel = _get_shuffle_kernel(A.dtype.str)
+            shuffle_kernel = _get_shuffle_kernel(B.dtype.str[1:])
             shuffle_args   = [ layer.shuffle_grid, layer.shuffle_block, self.stream,
                                B_gpudata, B.gpudata ] + layer.shuffle_args
         if op == "updat" and C.dtype.type is not np.float32:
