@@ -84,10 +84,10 @@
     37,36,45,44,53,52,61,60 : cx<0-7>y7
 
     64-67   ~ tid, blkI, blkE
-    68-111  ~ tidX, tidY, tid1, tid7, tid128, shiftX, blkMPQ, magic_PQ, grid_PQ, magic_Q, grid_Q, pq, m
+    68-111  ~ tidX, tidY, tid1, tid7, tid128, shiftX, blkMPQ, pq, m
 
-    64-95   ~ tidYY, mm, QN, PQN, MPQN, WN, HWN, DHWN, str_d, str_h, pad_d, pad_h, mt, pr, y, z, y0, yH, z0, zD, bounds_yz, c, r, t, rst, RS, S, magic_S, magic_RS, RST, magic_RST
-    64-95   ~ N, qs, x, pad_w, str_w, x0, xW, bounds_x, ti, te
+    64-95   ~ tidYY, mm, mt, pr, y, z, y0, yH, z0, zD, bounds_yz, c, r, t, rs, rst
+    64-95   ~ qs, x, x0, xW, bounds_x, ti, te
 
     64-79   : j0Ex<0-7>, j0Iy<0-7>
     80-95   : j1Ex<0-7>, j1Iy<0-7>
@@ -124,24 +124,21 @@
 
 --:-:-:-:1      PSETP.AND.AND P0, PT, PT, PT, PT;
 
---:-:-:-:1      MOV magic_PQ, param_magic_PQ;
---:-:-:-:1      MOV magic_Q,  param_magic_Q;
---:-:-:-:1      MOV grid_PQ,  param_grid_PQ;
---:-:-:-:1      MOV grid_Q,   param_grid_Q;
-
 // m  = blkMPQ / PQ
 // pq = blkMPQ % PQ
-02:-:-:-:1      XMAD.LO2 m, magic_PQ, blkMPQ, RZ;
---:-:-:-:1      SHR.U32 m, m, param_shift_PQ;
---:-:-:-:1      VMAD.U16.U16 pq, -m, grid_PQ, blkMPQ;
+02:-:-:-:1      XMAD.LO2C m, blkMPQ, param_magic_PQ, RZ;
+--:-:-:-:1      SHR.U32   m, m,      param_shift_PQ;
+--:-:-:-:1      XMAD pq,  m, param_grid_PQ, RZ;
+--:-:-:-:1      IADD pq, -pq, blkMPQ;
 // p = pq / Q
 // q = pq % Q
---:-:-:-:1      XMAD.LO2 p, magic_Q, pq, RZ;
---:-:-:-:1      SHR.U32 p, p, param_shift_Q;
---:-:-:-:1      VMAD.U16.U16 q, -p, grid_Q, pq;
+--:-:-:-:1      XMAD.LO2C p, pq, param_magic_Q, RZ;
+--:-:-:-:1      SHR.U32   p, p,  param_shift_Q;
+--:-:-:-:1      XMAD  q,  p, param_grid_Q, RZ;
+--:-:-:-:1      IADD  q, -q, pq;
 
 // We need to be able to restore m and q at each P iteration
-// Resiter spill to shared
+// Register spill to shared
 --:-:-:-:1      STS [addr_m], m;
 --:-:-:-:1      STS [addr_q], q;
 
@@ -183,56 +180,40 @@ NEXT_P:
 <SCHEDULE_BLOCK>
 --:-:6:-:1      LDS q, [addr_q];
 
---:-:-:-:1      MOV S,           param_S;
---:-:-:-:1      MOV RS,          param_RS;
---:-:-:-:1      MOV RST,         param_RST;
---:-:-:-:1      MOV magic_S,     param_magic_S;
---:-:-:-:1      MOV magic_RS,    param_magic_RS;
---:-:-:-:1      MOV magic_RST,   param_magic_RST;
---:-:-:-:1      MOV pad_d,       param_pad_d;
---:-:-:-:1      MOV pad_h,       param_pad_h;
---:-:-:-:1      MOV str_d,       param_str_d;
---:-:-:-:1      MOV str_h,       param_str_h;
---:-:-:-:1      MOV QN,          param_QN;
---:-:-:-:1      MOV PQN,         param_PQN;
---:-:-:-:1      MOV MPQN,        param_MPQN;
---:-:-:-:1      MOV WN,          param_WN;
---:-:-:-:1      MOV HWN,         param_HWN;
---:-:-:-:1      MOV DHWN,        param_DHWN;
-
 // c   = crst / RST
 // rst = crst % RST
---:-:-:-:1      XMAD.LO2 c, magic_RST, crst, RZ;
---:-:-:-:1      SHR.U32 c, c, param_shift_RST;
---:-:-:-:1      VMAD.U16.U16 rst, -c, RST, crst;
+--:-:-:-:1      XMAD.LO2C c, crst, param_magic_RST, RZ;
+--:-:-:-:1      SHR.U32   c, c, param_shift_RST;
+--:-:-:-:1      XMAD rst, c, param_RST, RZ;
+--:-:-:-:1      IADD rst, -rst, crst;
 // t =  rst / RS
 // rs = rst % RS
---:-:-:-:1      XMAD.LO2 t, magic_RS, rst, RZ;
---:-:-:-:1      SHR.U32 t, t, param_shift_RS;
---:-:-:-:1      VMAD.U16.U16 rst, -t, RS, rst;
+--:-:-:-:1      XMAD.LO2C t, rst, param_magic_RS, RZ;
+--:-:-:-:1      SHR.U32   t, t, param_shift_RS;
+--:-:-:-:1      XMAD  rs, t, param_RS, RZ;
+--:-:-:-:1      IADD  rs, -rs, rst;
 // r = rs / S
 // s = rs % S
---:-:-:-:1      XMAD.LO2 r, magic_S, rst, RZ;
---:-:-:-:1      SHR.U32 r, r, param_shift_S;
---:-:-:-:1      VMAD.U16.U16 s, -r, S, rst;
-// mt = m * w - pad_d
-// pr = p * u - pad_h
-10:-:-:-:1      VMAD.U16.U16 mt, mm, str_d, -pad_d;
---:-:-:-:1      VMAD.U16.U16 pr, p,  str_h, -pad_h;
-// y = pr + r
-// z = mt + t
---:-:-:-:1      IADD y, pr, r;
---:-:-:-:1      IADD z, mt, t;
+--:-:-:-:1      XMAD.LO2C r, rs, param_magic_S, RZ;
+--:-:-:-:1      SHR.U32   r, r, param_shift_S;
+--:-:-:-:1      XMAD   s, r, param_S, RZ;
+--:-:-:-:1      IADD   s, -s, rs;
+// y = p * u - pad_h + r
+// z = m * w - pad_d + t
+--:-:-:-:1      XMAD  pr, p,   param_str_h, RZ;
+10:-:-:-:1      XMAD  mt, mm,  param_str_d, RZ;
+--:-:-:-:1      IADD3 y, pr,  -param_pad_h, r;
+--:-:-:-:1      IADD3 z, mt,  -param_pad_d, t;
 // e = k*MPQN + m*PQN + p*QN + tidYY
 08:-:-:-:1      LOP.AND tidYY, tidYY, 1;
 --:-:-:-:1      SHL     tidYY, tidYY, 2;
---:-:-:-:1      XMAD.LO2 e,   QN, p,  tidYY;
---:-:-:-:1      XMAD.LO2 e,  PQN, mm, e;
---:-:-:-:1      XMAD.LO2 e, MPQN, k,  e;
+--:-:-:-:1      XMAD.LO2C e, p,  param_QN,   tidYY;
+--:-:-:-:1      XMAD.LO2C e, mm, param_PQN,  e;
+--:-:-:-:1      XMAD.LO2C e, k,  param_MPQN, e;
 // i = c*DHWN + z*HWN + y*WN + tidYY
---:-:-:-:1      XMAD.LO2 i,   WN, y, tidYY;
---:-:-:-:1      XMAD.LO2 i,  HWN, z, i;
---:-:-:-:1      XMAD.LO2 i, DHWN, c, i;
+--:-:-:-:1      XMAD.LO2C i, y, param_WN,   tidYY;
+--:-:-:-:1      XMAD.LO2C i, z, param_HWN,  i;
+--:-:-:-:1      XMAD.LO2C i, c, param_DHWN, i;
 // bounds_yz = y < 0 || y > H || z < 0 || z > D ? -1 : 0
 --:-:-:-:1      ISET.LT.AND y0, y,  RZ, PT;
 --:-:-:-:1      ISET.GE.AND yH, y,  param_H, PT;
@@ -254,15 +235,10 @@ NEXT_Q:
 <SCHEDULE_BLOCK>
 // k < K
 --:-:-:-:1      ISETP.LT.AND P3, PT, k, param_K, PT;
-
---:-:-:-:1      MOV N,           param_N;
---:-:-:-:1      MOV pad_w,       param_pad_w;
---:-:-:-:1      MOV str_w,       param_str_w;
-
 // qs = q * v - pad_w
 // x = qs + s
-20:-:-:-:1      VMAD.U16.U16 qs, q, str_w, -pad_w;
---:-:-:-:1      IADD x, qs, s;
+20:-:-:-:1      XMAD  qs, q,  param_str_w, RZ;
+--:-:-:-:1      IADD3 x, qs, -param_pad_w, s;
 // bounds_x = x < 0 || x > W ? -1 : 0
 --:-:-:-:1      ISET.LT.AND x0, x, RZ, PT;
 --:-:-:-:1      ISET.GE.AND xW, x,  param_W, PT;
@@ -270,18 +246,18 @@ NEXT_Q:
 // doLoad = crst < CRST && bounds_yz == 0 && bounds_x == 0
 --:-:-:-:1      ISETP.EQ.AND P2, PT, bounds_x, RZ, P4;
 // trackI = I + i + x*N
---:-:-:-:1      VMAD.U16.U16 ti, x, N, i;
+--:-:-:-:1      XMAD ti, x, param_N, i;
 --:-:-:-:1      LEA      trackI0.CC, ti, param_I[0],     2;
 --:-:-:-:1      LEA.HI.X trackI1,    ti, param_I[1], RZ, 2;
 // trackE = E + e + q*N
---:-:-:-:1      VMAD.U16.U16 te, q, N, e;
+--:-:-:-:1      XMAD te, q, param_N, e;
 --:-:-:-:1      LEA      trackE0.CC, te, param_E[0],     2;
 --:-:-:-:0      LEA.HI.X trackE1,    te, param_E[1], RZ, 2;
 // q += grid_Q
 --:-:-:-:1      IADD q, q, param_grid_Q;
 --:-:-:-:1      ISETP.LT.AND P5, PT, q, param_Q, PT;
 
---:-:-:-:1 @!P0 IADD loopN, loopN, N;
+--:-:-:-:1 @!P0 IADD loopN, loopN, param_N;
 
 </SCHEDULE_BLOCK>
 
@@ -306,14 +282,13 @@ NEXT_Q:
 --:-:-:-:1      STS [writeS + 4x< 2*128>], loadI2;
 --:-:-:-:1      STS [writeS + 4x< 3*128>], loadI3;
 
---:-:-:-:0      PSETP.AND.AND P5, PT, P1, P5, PT;
-
 02:-:-:-:1      STS [writeS + 4x< 8*128 + 16>], loadI4;
 --:-:-:-:1      STS [writeS + 4x< 9*128 + 16>], loadI5;
 --:-:-:-:1      STS [writeS + 4x<10*128 + 16>], loadI6;
 --:-:-:-:1      STS [writeS + 4x<11*128 + 16>], loadI7;
 
---:-:-:-:0      IADD   trackI0.CC, trackI0, 4x<16>;
+--:-:-:-:1      IADD   trackI0.CC, trackI0, 4x<16>;
+--:-:-:-:0      PSETP.AND.AND P5, PT, P1, P5, PT;
 
 24:-:-:-:1      STS [writeS + 4x< 0*128 + szBuf>], loadE0;
 --:-:-:-:1      STS [writeS + 4x< 1*128 + szBuf>], loadE1;

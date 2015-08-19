@@ -566,8 +566,8 @@ def _build_tree(type_args):
             operand = stack.pop()
             reds    = 1
             # if child is another node accumulate reduction count
-            if type(operand) is list: 
-                reds += operand[2] 
+            if type(operand) is list:
+                reds += operand[2]
             # reductions are scalar by definition
             stack.append([arg, True, reds, operand])
 
@@ -594,7 +594,7 @@ def _print_tree(node, level=0):
 # generate a stack from a portion of the tree
 def _post_order(node, stack=None):
 
-    if stack is None: 
+    if stack is None:
         stack = list()
 
     if type(node) is list:
@@ -637,7 +637,7 @@ def _process_node(node, aliases, duplicates):
         # first time seeing this reduction, record it in the dict
         # the last item in the stack will be the reduction op
         duplicates[key] = stack[-1]
-        # record which nodes can be aliased 
+        # record which nodes can be aliased
         aliases.add(stack[-1])
 
     # drop any children (children start at position 3)
@@ -659,7 +659,7 @@ def _split_stages(node, duplicates=None, aliases=None, stages=None, parents=None
 
     if type(node) is list:
 
-        # don't count assignment node as a parent, 
+        # don't count assignment node as a parent,
         # it will always exist in the final stage which is processed outside of this function
         if node[0][0] != "assign":
             parents.append(node)
@@ -724,7 +724,7 @@ def _get_compound_kernel(type_args):
     stages = _split_stages(tree)
     # _print_tree(tree)
     # exit()
-    
+
     # set the final stage type to type of output (scalar or elementwise)
     last_stage = "red_out" if tree[1] == 1 else "ew_out"
     # convert the remainder of tree to stack
@@ -746,8 +746,8 @@ def _get_compound_kernel(type_args):
     rand_func     = False
     threads       = type_args[-1][3]
     template      = _ew_template
-    template_vals = { 
-        "threads" : threads, 
+    template_vals = {
+        "threads" : threads,
         "name"    : _get_kernel_name(),
         "common"  : list(),
         "inits"   : list(),
@@ -780,7 +780,7 @@ def _get_compound_kernel(type_args):
             template += _stage_template["red_ops"].format(stage)
 
         elif stage_type == "red_out":
-            
+
             new_placeholders.append("ops%d" % stage)
             template += _stage_template["red_out"].format(stage)
 
@@ -821,7 +821,7 @@ def _get_compound_kernel(type_args):
 
                     array_ids.add(arg_id)
                     array_ids.add((arg_id, stage))
-                    
+
                     sig = "Pii"
                     if take_axis > 0:
                         sig += "P"
@@ -1037,7 +1037,7 @@ def _get_compound_kernel(type_args):
 @memoize
 def _get_fast_ew_dims(size):
 
-    # TODO: I can probably do much better than this code below, 
+    # TODO: I can probably do much better than this code below,
     # but I think most tensors are evenly divisable by 256 off the bat.
     ew_size = 256
     while ew_size > 0:
@@ -1160,7 +1160,7 @@ def call_compound_kernel(rand_state, *args):
                     strides[axis]   = 0
 
                 kernel_args.extend((arg.gpudata, strides[0], strides[1]))
-                
+
                 # fancy indexing/take
                 if arg.take_array:
                     kernel_args.append(arg.take_array[0].gpudata)
@@ -1189,7 +1189,7 @@ def call_compound_kernel(rand_state, *args):
             else:
                 indx = const_ids[arg] = arg_cnt
                 arg_cnt += 1
-                
+
                 kernel_args.append(arg)
 
             type_args.append((float, indx))
@@ -1321,19 +1321,30 @@ def call_compound_kernel(rand_state, *args):
 
     return out
 
+# quick wrapper to convert raw fp32 scratch data to a destination tensor
+def fp32_convert(src_data, dest_tensor):
+
+    shape, strides = _get_fast_ew_dims(dest_tensor.size)
+    kernel_args    = [0, dest_tensor.gpudata, strides[0], strides[1], src_data, strides[0], strides[1], shape[1] ]
+    kernel         = _get_compound_kernel((
+        (ng.GPUTensor,0,dest_tensor.dtype.str[1:],0),
+        (ng.GPUTensor,1,"f4",0),
+        ('assign', 0, False, 32)))
+    kernel.prepared_async_call((shape[0],1,1), (32,1,1), dest_tensor.backend.stream, *kernel_args)
+
 
 _transpose_kernel = r"""
 __global__ void transpose(float* out, const float* in, int rows, int cols, int row_strd, int col_strd)
 {
     __shared__ float tile[32][33];
- 
+
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int bx = blockIdx.x;
     int by = blockIdx.y;
     int gx = bx * 32 + tx;
     int gy = by * 32 + ty;
- 
+
     for (int j = 0; j < 32; j += 8)
     {
         int gy8 = gy + j;
@@ -1341,10 +1352,10 @@ __global__ void transpose(float* out, const float* in, int rows, int cols, int r
             tile[ty + j][tx] = in[gy8*row_strd + gx*col_strd];
     }
     __syncthreads();
- 
+
     gx = by * 32 + tx;
     gy = bx * 32 + ty;
- 
+
     for (int j = 0; j < 32; j += 8)
     {
         int gy8 = gy + j;
@@ -1367,14 +1378,14 @@ def _get_transpose_kernel(a_dtype, out_dtype):
 
 _shuffle_kernel = r"""
 __global__ void dimShuffle(
-    float* out, const float* in, 
-    int TRSK, int RSK, int SK, int K, 
+    float* out, const float* in,
+    int TRSK, int RSK, int SK, int K,
     int TRSC, int RSC, int SC, int C,
-    int RS, int magic_RS, int shift_RS, 
+    int RS, int magic_RS, int shift_RS,
     int S,  int magic_S,  int shift_S)
 {
     __shared__ float tile[32][33];
- 
+
     int tx  = threadIdx.x;
     int ty  = threadIdx.y;
     int bk  = blockIdx.x;
@@ -1400,7 +1411,7 @@ __global__ void dimShuffle(
 
     k = bk * 32 + ty;
     c = bc * 32 + tx;
- 
+
     for (int i = 0; i < 32; i += 8)
     {
         int ki = k + i;
@@ -1534,7 +1545,7 @@ def _get_kernel_name():
 
     for name in (path2, file_base, ext):
         name = name_re.sub("", name)
-        if name: 
+        if name:
             names.append(name)
     names.append(str(caller[1]))
 

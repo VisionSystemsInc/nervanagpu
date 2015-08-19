@@ -260,72 +260,26 @@ class ConvLayer(Layer):
         self.fprop_size = "K64_N64"
         self.bprop_size = "C64_N64"
 
-        #update_size = "C128_K64"
-
         #TODO: tune this further
-        if  (update_size == "C64_K64" or update_size == "C128_K64") or \
-            (update_size is None and (C <= 64 or K <= 64 or (K % 64 == 0 and K % 128 != 0))):
+        if  (update_size == "C128_K64") or \
+            (update_size is None and (Q > 56 or K <= 64 or (K % 64 == 0 and K % 128 != 0))):
 
-            if self.dtype is np.float32:
-                self.updat_size = "C128_K64"
-                updat_grid  = [0, grid_CRST128, grid_K64]
-                updat_block = 128
-            else:
-                self.updat_size = "C64_K64"
-                updat_grid  = [0, grid_CRST64, grid_K64]
-                updat_block = 64
+            self.updat_size = "C128_K64"
+            updat_grid  = [0, grid_CRST128, grid_K64]
+            updat_block = 128
         else:
             self.updat_size = "C128_K128"
             updat_grid  = [0, grid_CRST128, grid_K128 ]
             updat_block = 256
 
         if grid_P == 0 or grid_Q == 0:
-            # Performance seems good with at least 4096 total threads per SM
-            # More threads might be faster but accuracy starts dropping off.
-            # Cap grid_P*grid_Q at 64 for fp16.
-            # TODO: explore L2 utilization here:
-            if self.dtype is np.float16:
-                inc_P  = False
-                grid_P = 1
-                grid_Q = 1
-                grid_O = updat_grid[1] * updat_grid[2] * M * updat_block
-                thresh = _get_sm_count() * 4096
-                while grid_O * grid_P * grid_Q < thresh and \
-                      grid_P <= P and grid_Q <= Q and \
-                      grid_P * grid_Q < 64:
-                    if inc_P:
-                        grid_P += 1
-                    else:
-                        grid_Q += 1
-                    inc_P = not inc_P
-            # When not concerned about accumulation accuracy just unroll things a bit
-            # but maximize the distribution.  This has the effect of better utilizing the L2.
+            grid_P = P
+            if Q > 112:
+                grid_Q = 4
+            elif Q > 56:
+                grid_Q = 2
             else:
-                grid_P = P
-                if Q > 112:
-                    grid_Q = 4
-                elif Q > 56:
-                    grid_Q = 2
-                else:
-                    grid_Q = 1
-
-            # TitanX optimization: make grid multiple of 24 for small grids
-            # TODO: explore L2 utilization here:
-            # TODO: add 980, 750, etc optimizations
-            # if _get_sm_count() == 24:
-            #     grid_PQ  = grid_P * grid_Q
-            #     if   grid_PQ < 30:
-            #         grid_P = 6
-            #         grid_Q = 4
-            #     elif grid_PQ < 54:
-            #         grid_P = 8
-            #         grid_Q = 6
-            #     elif grid_PQ < 78:
-            #         grid_P = 9
-            #         grid_Q = 8
-            #     elif grid_PQ <= 108:
-            #         grid_P = 12
-            #         grid_Q = 8
+                grid_Q = 1
 
         if grid_P >= P: grid_P = P
         if grid_Q >= Q: grid_Q = Q

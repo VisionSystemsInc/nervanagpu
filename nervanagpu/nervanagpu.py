@@ -19,7 +19,7 @@ import pycuda.driver as drv
 from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
-from .float_ew import call_compound_kernel, _get_compensated_sum_kernel, _get_fast_ew_dims, _get_transpose_kernel, _get_shuffle_kernel
+from .float_ew import call_compound_kernel, fp32_convert, _get_compensated_sum_kernel, _get_fast_ew_dims, _get_transpose_kernel, _get_shuffle_kernel
 from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
 
 if sys.version_info >= (3, 0):
@@ -470,7 +470,7 @@ class NervanaGPU(object):
 
     def __init__(self, stochastic_round=False, bench=False,
                  cubin_path=os.path.join("kernels", "cubin"),
-                 scratch_size=64*64*224*224, default_dtype=np.float16):
+                 scratch_size=9*512*512, default_dtype=np.float16):
         """
         NervanaGPU: the primary interface class and factory for GPUTensors
 
@@ -624,27 +624,32 @@ class NervanaGPU(object):
 
     def _execute_conv(self, layer, op, size, grid, block, args, shared, A, B, C, alpha, relu, zero, repeat):
 
-        assert B.dtype == C.dtype
-        assert A.dtype == C.dtype
+        assert A.dtype == B.dtype
 
-        clss  = "hconv" if C.dtype.type is np.float16 else "sconv"
+        clss  = "hconv" if A.dtype.type is np.float16 else "sconv"
 
         flags = 0
         if relu: flags |= 2
 
-        if op == "bprop":
-            assert  B.size < self.scratch_size
+        B_gpudata      = B.gpudata
+        C_gpudata      = C.gpudata
+        shuffle_kernel = None
+        convert_data   = False
+
+        if   op == "bprop":
+            assert B.size <= self.scratch_size
             B_gpudata      = _get_scratch_data(self.scratch_size)
             shuffle_kernel = _get_shuffle_kernel(A.dtype.str)
             shuffle_args   = [ layer.shuffle_grid, layer.shuffle_block, self.stream,
                                B_gpudata, B.gpudata ] + layer.shuffle_args
-        else:
-            B_gpudata      = B.gpudata
-            shuffle_kernel = None
+        if op == "updat" and C.dtype.type is not np.float32:
+            assert C.size <= self.scratch_size
+            C_gpudata      = _get_scratch_data(self.scratch_size)
+            convert_data   = True
 
         kernel = _get_conv_kernel(self.cubin_path, clss, op, size)
         params = [ grid, block, self.stream,
-                   C.gpudata, A.gpudata, B_gpudata,
+                   C_gpudata, A.gpudata, B_gpudata,
                    alpha, flags ] + args
 
         # Warmup
@@ -658,20 +663,23 @@ class NervanaGPU(object):
 
         for r in range(repeat):
             if zero:
-                C.fill(0.0)
+                drv.memset_d32_async(C_gpudata, 0, C.size, self.stream)
 
             if shuffle_kernel:
                 shuffle_kernel.prepared_async_call(*shuffle_args)
 
             kernel.prepared_async_call(*params, shared_size=shared)
 
+            if convert_data:
+                fp32_convert(C_gpudata, C)
+
         if self.bench or repeat > 1:
             end.record(stream=self.stream)
             end.synchronize()
             msecs  = end.time_since(start) / repeat
             gflops = layer.flops / (msecs * 1000000.0)
-            print("%7.3f msecs %8.3f gflops (%s: %s) size:%s grid:%s" %
-                  (msecs, gflops, op, layer, size, grid))
+            print("%7.3f msecs %8.3f gflops %6.0f (%s: %s) size:%s grid:%s" %
+                  (msecs, gflops, layer.flops/1000000.0, op, layer, size, grid))
 
     def pool_layer(self, dtype,
             op, N, C,

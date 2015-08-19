@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-// nvcc -arch sm_52 -cubin hconv_updat_C128_K128.cu
+// nvcc -arch sm_50 -cubin sconv_updat_C128_K64.cu
 
 extern "C"
-__global__ void __launch_bounds__(256) hconv_updat_C128_K128
+__global__ void __launch_bounds__(128) hconv_updat_C128_K64
 (
-    float* param_F,
+    float*        param_F,
     const unsigned short*  param_I,
     const unsigned short*  param_E,
     float param_alpha,
@@ -64,11 +64,11 @@ __global__ void __launch_bounds__(256) hconv_updat_C128_K128
     int param_part_PQ
 )
 {
-    __shared__ float share[(128*16 + 32)*4 + 5];
+    __shared__ float share[(128*16 + 32)*2 + (64*16 + 32)*2 + 4];
 
     int tid = threadIdx.x;
 
     share[tid] = 1;
 
-    *param_F = share[255-tid];
+    *param_F = share[127-tid];
 }
