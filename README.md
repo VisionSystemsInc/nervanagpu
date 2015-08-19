@@ -105,7 +105,7 @@ eps  = .001 # for avoiding division by zero
 A    = ng.empty((128, 32), dtype=np.float16)
 A[:] = ng.rand() # generate uniform random on device between 0 and 1
 
-# Normalize batch data by batch mean and variance, 
+# Normalize batch data by batch mean and variance,
 A[:] = (A - ng.mean(A, axis=1)) / ng.sqrt(ng.var(A, axis=1) + eps)
 
 ```
@@ -131,43 +131,59 @@ Documentation and tests are currently sparse. Please contribute.
 Here is a sample run of `benchmarks/convnet-benchmarks.py` using the networks listed on Soumith Chintala's [benchmarking page](https://github.com/soumith/convnet-benchmarks).  Run on a single TitanX with default clocks and power limit:
 
     ---------------------------------------------
-    Alexnet (dtype=float16, N=128)  Results:
+    Alexnet (dtype=float16, N=128) Results:
     ---------------------------------------------
-    Avg(10) fprop:   29.498 msecs 6043.698 gflops
-    Avg(10) bprop:   66.562 msecs 5356.689 gflops
-    Avg(10) total:   96.059 msecs 5567.654 gflops
+    Avg(10) fprop:   28.341 msecs 6290.357 gflops
+    Avg(10) bprop:   60.768 msecs 5867.390 gflops
+    Avg(10) total:   89.109 msecs 6001.914 gflops
     ---------------------------------------------
-    Alexnet (dtype=float32, N=128)  Results:
+    Alexnet (dtype=float32, N=128) Results:
     ---------------------------------------------
-    Avg(10) fprop:   31.251 msecs 5704.698 gflops
-    Avg(10) bprop:   77.567 msecs 4596.660 gflops
-    Avg(10) total:  108.818 msecs 4914.869 gflops
+    Avg(10) fprop:   29.399 msecs 6064.057 gflops
+    Avg(10) bprop:   67.082 msecs 5315.141 gflops
+    Avg(10) total:   96.481 msecs 5543.344 gflops
+
 
     ---------------------------------------------
-    Overfeat (dtype=float16, N=128)  Results:
+    Overfeat (dtype=float16, N=128) Results:
     ---------------------------------------------
-    Avg(10) fprop:  116.723 msecs 6134.994 gflops
-    Avg(10) bprop:  242.084 msecs 5916.054 gflops
-    Avg(10) total:  358.807 msecs 5987.277 gflops
+    Avg(10) fprop:  107.722 msecs 6647.586 gflops
+    Avg(10) bprop:  236.972 msecs 6043.677 gflops
+    Avg(10) total:  344.694 msecs 6232.408 gflops
     ---------------------------------------------
-    Overfeat (dtype=float32, N=128)  Results:
+    Overfeat (dtype=float32, N=128) Results:
     ---------------------------------------------
-    Avg(10) fprop:  124.569 msecs 5748.559 gflops
-    Avg(10) bprop:  278.408 msecs 5144.192 gflops
-    Avg(10) total:  402.977 msecs 5331.015 gflops
+    Avg(10) fprop:  117.611 msecs 6088.632 gflops
+    Avg(10) bprop:  268.379 msecs 5336.422 gflops
+    Avg(10) total:  385.990 msecs 5565.621 gflops
+
 
     ---------------------------------------------
-    VGG (dtype=float16, N=64)  Results:
+    VGG (dtype=float16, N=64) Results:
     ---------------------------------------------
-    Avg(10) fprop:  162.186 msecs 5978.348 gflops
-    Avg(10) bprop:  357.850 msecs 5419.051 gflops
-    Avg(10) total:  520.036 msecs 5593.481 gflops
+    Avg(10) fprop:  156.761 msecs 6185.247 gflops
+    Avg(10) bprop:  341.635 msecs 5676.258 gflops
+    Avg(10) total:  498.396 msecs 5836.350 gflops
     ---------------------------------------------
-    VGG (dtype=float32, N=64)  Results:
+    VGG (dtype=float32, N=64) Results:
     ---------------------------------------------
-    Avg(10) fprop:  170.822 msecs 5676.112 gflops
-    Avg(10) bprop:  438.031 msecs 4427.108 gflops
-    Avg(10) total:  608.853 msecs 4777.533 gflops
+    Avg(10) fprop:  167.904 msecs 5774.753 gflops
+    Avg(10) bprop:  392.034 msecs 4946.530 gflops
+    Avg(10) total:  559.938 msecs 5194.882 gflops
+
+
+    ---------------------------------------------
+    VGG_E (dtype=float16, N=64) Results:
+    ---------------------------------------------
+    Avg(10) fprop:  405.705 msecs 6183.168 gflops
+    Avg(10) bprop:  876.252 msecs 5725.624 gflops
+    Avg(10) total: 1281.958 msecs 5870.424 gflops
+    ---------------------------------------------
+    VGG_E (dtype=float32, N=64) Results:
+    ---------------------------------------------
+    Avg(10) fprop:  444.173 msecs 5647.681 gflops
+    Avg(10) bprop:  987.882 msecs 5078.635 gflops
+    Avg(10) total: 1432.054 msecs 5255.133 gflops
 
 
 #### Acknowledgements
