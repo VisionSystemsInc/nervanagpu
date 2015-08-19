@@ -4,9 +4,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,8 +25,8 @@ from time import sleep
 print(context.get_device().name())
 
 # Set dtype to float32 or float16
-dtype  = np.float16
-repeat = 20
+dtype  = np.float32
+repeat = 10
 
 start, end = (drv.Event(), drv.Event())
 
@@ -60,6 +60,7 @@ conv_mode = libcudnn.cudnnConvolutionMode['CUDNN_CROSS_CORRELATION']
 fwd_pref  = libcudnn.cudnnConvolutionFwdPreference['CUDNN_CONVOLUTION_FWD_NO_WORKSPACE']
 # CUDNN_CONVOLUTION_FWD_NO_WORKSPACE
 # CUDNN_CONVOLUTION_FWD_PREFER_FASTEST
+# CUDNN_CONVOLUTION_FWD_ALGO_FFT                   = 4
 
                 # N    C   K  D    H   W  T  R  S   pad    str
 for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
@@ -137,10 +138,11 @@ for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
 
     ws_ptr = None
 
-    start_bench()
-    for r in (range(repeat)):
-        libcudnn.cudnnConvolutionBackwardData(cudnn, alpha, F_desc, F_data, E_desc, E_data, C_desc, beta, B_desc, B_data)
-    end_bench("bprop")
+    if C >= 64:
+        start_bench()
+        for r in (range(repeat)):
+            libcudnn.cudnnConvolutionBackwardData(cudnn, alpha, F_desc, F_data, E_desc, E_data, C_desc, beta, B_desc, B_data)
+        end_bench("bprop")
 
     start_bench()
     for r in (range(repeat)):
@@ -163,12 +165,13 @@ for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
     cuE = None
 
     nlB = ng.empty(dimI, dtype=dtype)
-    nlU = ng.empty(dimF, dtype=dtype)
+    nlU = ng.empty(dimF, dtype=np.float32)
     nlO = ng.empty(dimO, dtype=dtype)
     #print(drv.mem_get_info())
 
     ng.fprop_conv (conv, nlI, nlF, nlO, alpha=alpha, repeat=repeat)
-    ng.bprop_conv (conv, nlF, nlE, nlB, alpha=alpha, repeat=repeat)
+    if C >= 64:
+        ng.bprop_conv (conv, nlF, nlE, nlB, alpha=alpha, repeat=repeat)
     ng.update_conv(conv, nlI, nlE, nlU, alpha=alpha, repeat=repeat)
 
     nlI = nlF = nlE = None
@@ -183,16 +186,19 @@ for dims in (   ( 64,  3, 64, 1, 224,224, 1, 3, 3, 0,1,1, 1,1,1), # VGG
     maxU = parU[0:1,0:1]
 
     maxo  = ng.max(abs(cuO - nlO.T), partial=parO, out=maxO).get()[0,0]
-    maxb  = ng.max(abs(cuB - nlB.T), partial=parB, out=maxB).get()[0,0]
+    if C >= 64:
+        maxb  = ng.max(abs(cuB - nlB.T), partial=parB, out=maxB).get()[0,0]
     maxu  = ng.max(abs(cuU - nlU.T), partial=parU, out=maxU).get()[0,0]
 
     meano = ng.mean(abs(cuO), partial=parO, out=maxO).get()[0,0]
-    meanb = ng.mean(abs(cuB), partial=parB, out=maxB).get()[0,0]
+    if C >= 64:
+        meanb = ng.mean(abs(cuB), partial=parB, out=maxB).get()[0,0]
     meanu = ng.mean(abs(cuU), partial=parU, out=maxU).get()[0,0]
 
     print("        maxerr   mean   pct")
     print("fprop: %7.5f %6.2f %5.3f" % (maxo, meano, 100*maxo/meano))
-    print("bprop: %7.5f %6.2f %5.3f" % (maxb, meanb, 100*maxb/meanb))
+    if C >= 64:
+        print("bprop: %7.5f %6.2f %5.3f" % (maxb, meanb, 100*maxb/meanb))
     print("updat: %7.5f %6.2f %5.3f" % (maxu, meanu, 100*maxu/meanu))
 
     # free up memory from this layer before proceeding

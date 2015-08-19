@@ -4,9 +4,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #    http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -79,8 +79,6 @@ networks = {
         { "layer":FullLayer, "nOut":1000 },
     ),
     # See http://arxiv.org/pdf/1409.1556.pdf for variations
-    # Not all of these will fit on a 980, but forthcoming hardware is a diferent story.
-    # The full VGG model fits at N=256 in 12GB with fp16.
     "VGG" : (
         { "layer":DataLayer, "N":64, "C":3, "H":224, "W":224},
         { "layer":ConvLayer, "K":64,  "common":conv3 },
@@ -144,13 +142,14 @@ networks = {
         { "layer":PoolLayer, "common":pool1j2 },
         { "layer":FullLayer, "nOut":1000 },
     ),
-    "VGG2" : (
+    # Here is the biggest VGG model (19 layers)
+    "VGG_E" : (
         { "layer":DataLayer, "N":64, "C":3, "H":224, "W":224},
         { "layer":ConvLayer, "K":64,  "common":conv3 },
-        { "layer":ConvLayer, "K":64,  "common":conv3 }, #, "update_size":"C128_K128"
+        { "layer":ConvLayer, "K":64,  "common":conv3 }, #, "update_size":"C128_K64"
         { "layer":PoolLayer, "common":pool2 },
         { "layer":ConvLayer, "K":128, "common":conv3 },
-        { "layer":ConvLayer, "K":128, "common":conv3 },
+        { "layer":ConvLayer, "K":128, "common":conv3 }, #
         { "layer":PoolLayer, "common":pool2 },
         { "layer":ConvLayer, "K":256, "common":conv3 },
         { "layer":ConvLayer, "K":256, "common":conv3 },
@@ -178,10 +177,10 @@ networks = {
     ),
 }
 
-# "Alexnet","Overfeat","VGG", "Alexnet2","Overfeat2","VGG2"
-for net in ("Alexnet","Overfeat","VGG",):
+# "Alexnet","Overfeat","VGG", "Alexnet2","Overfeat2","VGG_E"
+for net in ("Alexnet","Overfeat","VGG","VGG_E",):
 
-    for dtype in (np.float16, np.float32): #np.float32
+    for dtype in (np.float16, np.float32): #np.float32, np.float32
 
         network = networks[net]
         name    = "%s (dtype=%s, N=%d)" % (net, np.dtype(dtype).name, network[0]["N"])
@@ -244,7 +243,7 @@ for net in ("Alexnet","Overfeat","VGG",):
         # Init shared buffers (assumes consistent dtype for now)
         shared_deltas[0] = ng.empty(max_delta_layer.dimO2,  dtype=max_delta_layer.dtype)
         shared_deltas[1] = ng.empty(max_delta_layer.dimO2,  dtype=max_delta_layer.dtype)
-        shared_weights   = ng.empty(max_weight_layer.dimF2, dtype=max_weight_layer.dtype)
+        shared_updates   = ng.empty(max_weight_layer.dimF2, dtype=np.float32)
 
         prev_layer = None
         delta = False
@@ -255,7 +254,7 @@ for net in ("Alexnet","Overfeat","VGG",):
             # Intitalize buffers.  Alernate shared delta buffer.
             # One layer can't have the same buffer for both error in and error out.
             layer.init_activations()
-            layer.init_weights(shared=shared_weights)
+            layer.init_weights(shared=shared_updates)
             layer.init_deltas(shared=shared_deltas[delta])
 
             # connect layer to previous layer

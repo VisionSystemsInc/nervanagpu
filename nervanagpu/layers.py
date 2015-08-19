@@ -23,9 +23,12 @@ if sys.version_info >= (3, 0):
     from functools import reduce
 
 class Layer(object):
-    def __init__(self, lib, dtype, N):
+    def __init__(self, lib, dtype, N, dtypeU=None):
+        if dtypeU is None:
+            dtypeU = dtype
         self.N         = N
         self.dtype     = dtype
+        self.dtypeU    = dtypeU
         self.lib       = lib
         self.fprop_in  = None
         self.fprop_out = None
@@ -56,9 +59,9 @@ class Layer(object):
             self.weights  = self.lib.array(weights,    dtype=self.dtype)
             self.velocity = self.lib.zeros(self.dimF2, dtype=self.dtype)
             if shared is None:
-                self.updates = self.lib.empty(self.dimF2, dtype=self.dtype)
+                self.updates = self.lib.empty(self.dimF2, dtype=self.dtypeU)
             else:
-                self.updates = shared.share(self.dimF2)
+                self.updates = shared.share(self.dimF2, dtype=self.dtypeU)
 
             self.weight_stats1 = self.lib.empty((self.dimF2[0],1), dtype=np.float32)
             self.weight_stats2 = self.weight_stats1[0:1,0:1]
@@ -185,7 +188,7 @@ class ConvLayer(Layer):
             str_d=1, str_h=1, str_w=1,
             grid_P=0, grid_Q=0, update_size=None):
 
-        super(ConvLayer, self).__init__(lib, dtype, N)
+        super(ConvLayer, self).__init__(lib, dtype, N, np.float32)
 
         assert N % 8 == 0, "N dim must be multiple of 8"
         assert K % 8 == 0, "K dim must be multiple of 8"
