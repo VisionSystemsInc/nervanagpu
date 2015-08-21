@@ -597,7 +597,7 @@ class NervanaGPU(object):
 
         return self._execute_conv(
             layer, "fprop", layer.fprop_size,
-            layer.fprop_grid, layer.fprop_block, layer.fprop_args, layer.lut_size,
+            layer.fprop_grid, layer.fprop_block, layer.fprop_args, layer.fprop_lut_size,
             I, F, O, alpha, relu, False, repeat)
 
     def bprop_conv(self, layer, F, E, grad_I, alpha=1.0, repeat=1):
@@ -608,8 +608,8 @@ class NervanaGPU(object):
 
         return self._execute_conv(
             layer, "bprop", layer.bprop_size,
-            layer.bprop_grid, layer.bprop_block, layer.bprop_args, layer.lut_size,
-            E, F, grad_I, alpha, False, False, repeat)
+            layer.bprop_grid, layer.bprop_block, layer.bprop_args, layer.bprop_lut_size,
+            E, F, grad_I, alpha, False, layer.bprop_zero, repeat)
 
     def update_conv(self, layer, I, E, grad_F, alpha=1.0, repeat=1):
 
@@ -639,9 +639,13 @@ class NervanaGPU(object):
         if   op == "bprop":
             assert B.size <= self.scratch_size
             B_gpudata      = _get_scratch_data(self.scratch_size)
-            shuffle_kernel = _get_shuffle_kernel(B.dtype.str[1:])
+            if zero:
+                shuffle_kernel = _get_transpose_kernel(B.dtype.str[1:])
+            else:
+                shuffle_kernel = _get_shuffle_kernel(B.dtype.str[1:])
             shuffle_args   = [ layer.shuffle_grid, layer.shuffle_block, self.stream,
                                B_gpudata, B.gpudata ] + layer.shuffle_args
+
         if op == "updat" and C.dtype.type is not np.float32:
             assert C.size <= self.scratch_size
             C_gpudata      = _get_scratch_data(self.scratch_size)
@@ -663,10 +667,14 @@ class NervanaGPU(object):
 
         for r in range(repeat):
             if zero:
-                drv.memset_d32_async(C_gpudata, 0, C.size, self.stream)
+                drv.memset_d8_async(C_gpudata, 0, C.nbytes, self.stream)
 
             if shuffle_kernel:
                 shuffle_kernel.prepared_async_call(*shuffle_args)
+                # ary = np.empty(layer.dimF2t, B.dtype)
+                # drv.memcpy_dtoh_async(ary, B_gpudata, None)
+                # print ary - B.get().reshape(layer.dimF2).T
+                # exit()
 
             kernel.prepared_async_call(*params, shared_size=shared)
 
@@ -1053,37 +1061,6 @@ class NervanaGPU(object):
 
         return C
 
-    def transpose(self, a, out, reshape=None, repeat=1):
-
-        if reshape is None:
-            reshape = a.shape
-            strides = a.strides
-        else:
-            strides = _contiguous_strides(reshape)
-
-        gridX   = (reshape[1] >> 5) + (reshape[1] & 31 != 0)
-        gridY   = (reshape[0] >> 5) + (reshape[0] & 31 != 0)
-        kernel  = _get_transpose_kernel(a.dtype.str, out.dtype.str)
-
-        if self.bench or repeat > 1:
-            start, end = _get_events()
-            start.record(self.stream)
-
-        for r in range(repeat):
-            kernel.prepared_async_call(
-                (gridX,gridY,1), (32,8,1), self.stream,
-                out.gpudata,  a.gpudata,
-                reshape[0],   reshape[1],
-                strides[0],   strides[1])
-
-        if self.bench or repeat > 1:
-            end.record(self.stream)
-            end.synchronize()
-            msecs = end.time_since(start) / repeat
-            print("%7.3f msecs (transpose: %s => %s) grid:(%d,%d)" % (msecs,reshape,reshape[::-1],gridX,gridY))
-
-
-
     def compensated_sum(self, sum_tensor, cmp_tensor, add_tensor, cmp_scale=1.0, add_scale=1.0):
 
         if cmp_tensor.kahan_reset and cmp_tensor.kahan_count > cmp_tensor.kahan_reset:
@@ -1347,9 +1324,11 @@ def _get_gemm_kernel(path, clss, op, size):
     return func
 
 _conv_sig = {
-    "fprop" : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
-    "bprop" : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
-    "updat" : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+    "fprop_K64_N64"   : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+    "bprop_C64_N64"   : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+    "bprop_C32_N64"   : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+    "updat_C128_K64"  : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+    "updat_C128_K128" : "PPPfIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
 }
 
 @context_dependent_memoize
@@ -1357,7 +1336,7 @@ def _get_conv_kernel(path, clss, op, size):
     module = _get_module(path, clss, op, size)
     kernel = "{0}_{1}_{2}".format(clss, op, size)
     func   = module.get_function(kernel)
-    func.prepare(_conv_sig[op])
+    func.prepare(_conv_sig["{0}_{1}".format(op, size)])
     #print("Loaded: ", kernel)
     return func
 

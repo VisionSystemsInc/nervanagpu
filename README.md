@@ -143,7 +143,6 @@ Here is a sample run of `benchmarks/convnet-benchmarks.py` using the networks li
     Avg(10) bprop:   67.082 msecs 5315.141 gflops
     Avg(10) total:   96.481 msecs 5543.344 gflops
 
-
     ---------------------------------------------
     Overfeat (dtype=float16, N=128) Results:
     ---------------------------------------------
@@ -157,7 +156,6 @@ Here is a sample run of `benchmarks/convnet-benchmarks.py` using the networks li
     Avg(10) bprop:  268.379 msecs 5336.422 gflops
     Avg(10) total:  385.990 msecs 5565.621 gflops
 
-
     ---------------------------------------------
     VGG (dtype=float16, N=64) Results:
     ---------------------------------------------
@@ -170,7 +168,6 @@ Here is a sample run of `benchmarks/convnet-benchmarks.py` using the networks li
     Avg(10) fprop:  167.904 msecs 5774.753 gflops
     Avg(10) bprop:  392.034 msecs 4946.530 gflops
     Avg(10) total:  559.938 msecs 5194.882 gflops
-
 
     ---------------------------------------------
     VGG_E (dtype=float16, N=64) Results:

@@ -193,6 +193,8 @@ class ConvLayer(Layer):
         assert N % 8 == 0, "N dim must be multiple of 8"
         assert K % 8 == 0, "K dim must be multiple of 8"
 
+        np_dtype = np.dtype(dtype)
+
         # Compute the output spatial dimensions
         M = int(ceil(float(D - T + 1 + 2*pad_d) / str_d))
         P = int(ceil(float(H - R + 1 + 2*pad_h) / str_h))
@@ -216,6 +218,7 @@ class ConvLayer(Layer):
         self.dimO   = (K,M,P,Q,N)
         self.dimI2  = (C*D*H*W,N)
         self.dimF2  = (C*T*R*S,K)
+        self.dimF2t = (K,C*T*R*S)
         self.dimO2  = (K*M*P*Q,N)
         self.sizeI  = reduce(mul, self.dimI, 1)
         self.sizeF  = reduce(mul, self.dimF, 1)
@@ -241,30 +244,33 @@ class ConvLayer(Layer):
 
         # I can easily get the kernels working with larger values here..
         # But this is what version 1 is coded to support.
-        assert PQM  < 2**16, "Integer division is faster with 16bit numerators"
-        assert DHW  < 2**16, "Integer division is faster with 16bit numerators"
-        assert CRST < 2**16, "Integer division is faster with 16bit numerators"
+        for dim in (PQM, DHW, CRST, KRST):
+            assert dim  < 2**16, "Integer division is faster with 16bit numerators"
 
         # precompute grid dimensions
-        grid_N64     = N    //  64 + (N    %  64 != 0)
-        grid_K64     = K    //  64 + (K    %  64 != 0)
-        grid_C64     = C    //  64 + (C    %  64 != 0)
-        grid_CRST64  = CRST //  64 + (CRST %  64 != 0)
-
-        grid_N128    = N    // 128 + (N    % 128 != 0)
-        grid_K128    = K    // 128 + (K    % 128 != 0)
+        grid_CRST32  = CRST //  32 + (CRST %  32 != 0)
         grid_CRST128 = CRST // 128 + (CRST % 128 != 0)
+        grid_C64     = C    //  64 + (C    %  64 != 0)
+        grid_K64     = K    //  64 + (K    %  64 != 0)
+        grid_K128    = K    // 128 + (K    % 128 != 0)
+        grid_N64     = N    //  64 + (N    %  64 != 0)
 
-        #TODO: add more 128x128 kernels for better performance at fp32.
         self.fprop_grid = (PQM, grid_K64,  grid_N64)
-        self.bprop_grid = (DHW, grid_C64,  grid_N64)
         self.fprop_block = (64, 1, 1)
-        self.bprop_block = (64, 1, 1)
         self.fprop_size = "K64_N64"
-        self.bprop_size = "C64_N64"
+
+        if (C & 7) == 0 and C > 32:
+            self.bprop_size  = "C64_N64"
+            self.bprop_block = (64, 1, 1)
+            self.bprop_grid  = (DHW, grid_C64, grid_N64)
+
+        else:
+            self.bprop_size = "C32_N64"
+            self.bprop_block = (32, 1, 1)
+            self.bprop_grid = (PQM, grid_CRST32, grid_N64)
 
         # in float32 the smaller kernel is actually faster in the larger feature maps
-        if update_size is None and np.dtype(dtype).type is np.float32 and Q > 56:
+        if update_size is None and np_dtype.type is np.float32 and Q > 56:
             update_size = "C128_K64"
 
         #TODO: tune this further
@@ -279,6 +285,7 @@ class ConvLayer(Layer):
             updat_grid  = [0, grid_CRST128, grid_K128 ]
             updat_block = 256
 
+        #TODO: tune this further
         if grid_P == 0 or grid_Q == 0:
             grid_P = P
             if Q > 112:
@@ -311,19 +318,18 @@ class ConvLayer(Layer):
         magic_HW    = _magic32(DHW, HW)
         magic_W     = _magic32(HW,  W)
 
+        # flop count for benchmarking
+        self.flops = PQM * K * N * CRST * 2.0
+
+        # shared lookup table size
+        self.fprop_lut_size = RST * 4 * 2
+
         # generate the convolution kernel args for fprop and bprop
         self.fprop_args = _flatten([
             N, K, D, H, W, WN, HWN, DHWN,
             C, KRST, RST, RS, magic_RS, S, magic_S,
             pad_d, pad_h, pad_w, str_d, str_h, str_w,
             Q, PQ, QN, PQN, MPQN, magic_Q, magic_PQ ])
-
-        self.bprop_args = _flatten([
-            N, C, M, P, Q, QN, PQN, MPQN,
-            K, CRST, RST, RS, magic_RS, S, magic_S,
-            pad_d, pad_h, pad_w, str_d, str_h, str_w,
-            W, HW, WN, HWN, DHWN, magic_W, magic_HW,
-            R, T, magic_str_w, magic_str_h, magic_str_d ])
 
         # update uses slightly different args
         self.update_args = _flatten([
@@ -333,23 +339,46 @@ class ConvLayer(Layer):
             P, Q, PQ, QN, PQN, MPQN, magic_Qu, magic_PQu,
             grid_P, grid_Q, grid_PQ])
 
-        # shared lookup table size
-        self.lut_size = RST * 4 * 2
+        # bprop kernel settings depend on tile size:
+        if self.bprop_size == "C64_N64":
 
-        # flop count for benchmarking
-        self.flops    = PQM * K * N * CRST * 2.0
+            self.bprop_lut_size = RST * 4 * 2
 
-        # generate the kernel args for dim shuffling C<=>K for bprop
-        self.shuffle_args = _flatten([
-            RST*K, RS*K, S*K, K,
-            RST*C, RS*C, S*C, C,
-            RS, magic_RS, S, magic_S])
+            self.bprop_args = _flatten([
+                N, C, M, P, Q, QN, PQN, MPQN,
+                K, CRST, RST, RS, magic_RS, S, magic_S,
+                pad_d, pad_h, pad_w, str_d, str_h, str_w,
+                W, HW, WN, HWN, DHWN, magic_W, magic_HW,
+                R, T, magic_str_w, magic_str_h, magic_str_d ])
 
-        gridX = (K >> 5) + (K & 31 != 0)
-        gridY = (C >> 5) + (C & 31 != 0)
-        self.shuffle_grid  = (gridX,gridY,RST)
-        self.shuffle_block = (32,8,1)
+            # generate the kernel args for dim shuffling CRSTK => KRSTC
+            self.shuffle_args = _flatten([
+                RST*K, RS*K, S*K, K,
+                RST*C, RS*C, S*C, C,
+                RS, magic_RS, S, magic_S])
+            gridX = (K >> 5) + (K & 31 != 0)
+            gridY = (C >> 5) + (C & 31 != 0)
+            self.shuffle_grid  = (gridX,gridY,RST)
+            self.shuffle_block = (32,8,1)
+            self.bprop_zero    = False
+        else:
 
+            self.bprop_lut_size = 0
+
+            self.bprop_args = _flatten([
+                N, K, D, H, W, WN, HWN, DHWN,
+                C, CRST, RST, magic_RST, RS, magic_RS, S, magic_S,
+                pad_d, pad_h, pad_w, str_d, str_h, str_w,
+                Q, PQ, QN, PQN, MPQN, magic_Q, magic_PQ,
+                CRST*8*np_dtype.itemsize, MPQN*8*np_dtype.itemsize ])
+
+            # generate the kernel args for transpose CRST,K => K,CRST
+            self.shuffle_args = [CRST, K]
+            gridX   = (K    >> 5) + (K    & 31 != 0)
+            gridY   = (CRST >> 5) + (CRST & 31 != 0)
+            self.shuffle_grid  = (gridX,gridY,1)
+            self.shuffle_block = (32,8,1)
+            self.bprop_zero    = True
 
     def fprop(self):
             self.lib.fprop_conv(self, self.fprop_in, self.weights, self.fprop_out, relu=True)

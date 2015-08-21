@@ -94,7 +94,7 @@ $(foreach w,$(WIDTHS), \
 
 CONV_TYPES := _fprop _bprop _updat
 CONV_CODES := _ # _s8_ _u8_
-CONV_SIZES := C64_N64 K64_N64 C64_K64 C128_K64 C128_K128
+CONV_SIZES := C32_N64 C64_N64 K64_N64 C64_K64 C128_K64 C128_K128
 $(foreach w,$(WIDTHS), \
   $(foreach t,$(CONV_TYPES), \
     $(foreach c,$(CONV_CODES), \

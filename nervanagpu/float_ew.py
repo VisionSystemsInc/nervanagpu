@@ -1334,9 +1334,9 @@ def fp32_convert(src_data, dest_tensor):
 
 
 _transpose_kernel = r"""
-__global__ void transpose(float* out, const float* in, int rows, int cols, int row_strd, int col_strd)
+__global__ void transpose(%(type)s* out, const %(type)s* in, int rows, int cols)
 {
-    __shared__ float tile[32][33];
+    __shared__ %(type)s tile[32][33];
 
     int tx = threadIdx.x;
     int ty = threadIdx.y;
@@ -1349,7 +1349,7 @@ __global__ void transpose(float* out, const float* in, int rows, int cols, int r
     {
         int gy8 = gy + j;
         if (gy8 < rows && gx < cols)
-            tile[ty + j][tx] = in[gy8*row_strd + gx*col_strd];
+            tile[ty + j][tx] = in[gy8*cols + gx];
     }
     __syncthreads();
 
@@ -1364,15 +1364,13 @@ __global__ void transpose(float* out, const float* in, int rows, int cols, int r
     }
 }
 """
-
-
 @context_dependent_memoize
-def _get_transpose_kernel(a_dtype, out_dtype):
+def _get_transpose_kernel(dtype):
 
-    code   = _transpose_kernel
+    code   = _transpose_kernel % _ew_types[dtype]
     module = SourceModule(code)
     kernel = module.get_function("transpose")
-    kernel.prepare("PPIIII")
+    kernel.prepare("PPII")
     return kernel
 
 
@@ -1420,7 +1418,6 @@ __global__ void dimShuffle(
     }
 }
 """
-
 @context_dependent_memoize
 def _get_shuffle_kernel(dtype):
 
