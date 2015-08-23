@@ -288,9 +288,8 @@ END_SETUP:
 // channel = posCRST / lutSize
 // Add an epsilon scaled to the size of the channel estimate then recompute and truncate it
 --:-:2:-:1      I2F.F32.S32 posCRSTf, posCRST;
-03:-:-:-:1      FMUL    channel, posCRSTf, lutSizeRcp;
---:-:-:-:1      FMUL32I channel, channel,  0x33800000;
---:-:-:-:1      FFMA    channel, posCRSTf, lutSizeRcp, channel;
+03:-:-:-:1      FMUL channel, posCRSTf, lutSizeRcp;
+--:-:-:-:1      FFMA channel, channel, 5.9604644775390625e-08, channel;
 --:-:2:-:1      F2I.S32.F32.TRUNC channel, channel;
 // lutOffset = (posCRST % lutSize) * 8
 02:-:-:-:1      VMAD.U16.U16 lutOffset, -channel, lutSize, posCRST;
@@ -318,8 +317,8 @@ END_SETUP:
 --:-:1:-:1  @P1 LDG.E.CI.128 loadF0, [trackF];
 --:-:5:-:1 @!P1 LDS.U.128    loadF0, [addr_zero];
 
---:-:2:-:1  @P1 LDG.E.CI.128 loadI0, [trackI];
---:-:6:-:1 @!P1 LDS.U.128    loadI0, [addr_zero];
+--:-:2:-:1  @P1 LDG.E.128 loadI0, [trackI];
+--:-:6:-:1 @!P1 LDS.U.128 loadI0, [addr_zero];
 
 --:-:-:-:0      ISETP.GE.AND P1, PT, posCRST, RZ, PT;
 
@@ -360,9 +359,8 @@ END_SETUP:
 <SCHEDULE_BLOCK>
 
 // channel = posCRST / lutSize
-02:-:-:-:1  @P1 FMUL    channel, posCRSTf, lutSizeRcp;
---:-:-:-:1  @P1 FMUL32I channel, channel,  0x33800000;
---:-:-:-:1  @P1 FFMA    channel, posCRSTf, lutSizeRcp, channel;
+02:-:-:-:1  @P1 FMUL channel, posCRSTf, lutSizeRcp;
+--:-:-:-:1  @P1 FFMA channel, channel, 5.9604644775390625e-08, channel;
 --:-:2:-:1  @P1 F2I.S32.F32.TRUNC channel, channel;
 // lutOffset = (posCRST % lutSize) * 8
 02:-:-:-:1  @P1 VMAD.U16.U16 lutOffset, -channel, lutSize, posCRST;
@@ -385,7 +383,7 @@ END_SETUP:
 --:-:-:-:6  @P1 LEA      trackI0.CC, offsetI, param_I[0],     1;
 --:-:-:-:0  @P1 LEA.HI.X trackI1,    offsetI, param_I[1], RZ, 1;
 --:-:2:-:2  @P1 LDG.E.CI.128 loadF0, [trackF + 4x< 0>];
---:-:3:-:1  @P1 LDG.E.CI.128 loadI0, [trackI + 4x< 0>];
+--:-:3:-:1  @P1 LDG.E.128    loadI0, [trackI + 4x< 0>];
 
 LOOP:
 
@@ -398,9 +396,8 @@ LOOP:
         j0c13 => "--:-:6:-:1  \@P1 I2F.F32.S32 posCRSTf, posCRST;\n",
 
         j0c39 => "20:-:-:-:1  \@P1 FMUL channel, posCRSTf, lutSizeRcp;\n",
-        j0c44 => "--:-:-:-:1  \@P1 FMUL32I channel, channel, 0x33800000;\n",
-        j0c49 => "--:-:-:-:1  \@P1 FFMA channel, posCRSTf, lutSizeRcp, channel;\n",
-        j0c51 => "--:-:6:-:1  \@P1 F2I.S32.F32.TRUNC channel, channel;\n",
+        j0c44 => "--:-:-:-:1  \@P1 FFMA channel, channel, 5.9604644775390625e-08, channel;\n",
+        j0c46 => "--:-:6:-:1  \@P1 F2I.S32.F32.TRUNC channel, channel;\n",
 
         j1c8  => "20:-:-:-:1  \@P1 VMAD.U16.U16 lutOffset, -channel, lutSize, posCRST;\n",
         j1c13 => "--:-:-:-:1  \@P1 SHL lutOffset, lutOffset, 3;\n",
@@ -446,7 +443,7 @@ LOOP:
         j6c50 => "--:-:-:-:1  \@P1 LEA      trackI0.CC, offsetI, param_I[0],     1;\n",
         j6c55 => "--:-:-:-:1  \@P1 LEA.HI.X trackI1,    offsetI, param_I[1], RZ, 1;\n",
 
-        j6c61 => "04:-:3:-:1  \@P1 LDG.E.CI.128 loadI0, [trackI];\n",
+        j6c61 => "04:-:3:-:1  \@P1 LDG.E.128 loadI0, [trackI];\n",
 
         j6c62 => "--:-:-:-:5  \@P0 BAR.SYNC 0;\n" .
                  "--:-:-:-:1  \@P0 LOP.XOR readIs, readIs, 4x<64*8*2>;\n" .

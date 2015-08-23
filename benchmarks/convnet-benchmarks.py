@@ -52,13 +52,13 @@ pool3j2 = { "op":"max", "J":2, "R":3, "S":3 }
 networks = {
     "Alexnet" : (
         { "layer":DataLayer, "N":128, "C":3, "H":224, "W":224},
-        { "layer":ConvLayer, "K":64, "R":11, "S":11, "str_h":4, "str_w":4, "pad_h":2, "pad_w":2 }, #, "update_size":"C128_K64"
+        { "layer":ConvLayer, "K":64, "R":11, "S":11, "str_h":4, "str_w":4, "pad_h":2, "pad_w":2, "grid_P":55, "grid_Q":5, "update_size":"C128_K64" },
         { "layer":PoolLayer, "common":pool3 },
-        { "layer":ConvLayer, "K":192, "R":5, "S":5, "pad_h":2, "pad_w":2 },
+        { "layer":ConvLayer, "K":192, "R":5, "S":5, "pad_h":2, "pad_w":2, "grid_P":1, "grid_Q":9, "update_size":"C128_K64" },
         { "layer":PoolLayer, "common":pool3 },
-        { "layer":ConvLayer, "K":384, "common":conv3 },
-        { "layer":ConvLayer, "K":256, "common":conv3 },
-        { "layer":ConvLayer, "K":256, "common":conv3 },
+        { "layer":ConvLayer, "K":384, "common":conv3, "grid_P":13, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":256, "common":conv3, "grid_P":13, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":256, "common":conv3, "grid_P":13, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":PoolLayer, "common":pool3 },
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":3072 },
@@ -66,13 +66,13 @@ networks = {
     ),
     "Overfeat" : (
         { "layer":DataLayer, "N":128, "C":3, "H":231, "W":231},
-        { "layer":ConvLayer, "K":96, "R":11, "S":11, "str_h":4, "str_w":4 },
+        { "layer":ConvLayer, "K":96, "R":11, "S":11, "str_h":4, "str_w":4, "grid_P":2, "grid_Q":8, "update_size":"C128_K128" },
         { "layer":PoolLayer, "common":pool2 },
-        { "layer":ConvLayer, "K":256, "R":5, "S":5 },
+        { "layer":ConvLayer, "K":256, "R":5, "S":5, np.float16:{"grid_P":3, "grid_Q":3, "update_size":"C128_K64"}, np.float32:{"grid_P":2, "grid_Q":3, "update_size":"C128_K128"} },
         { "layer":PoolLayer, "common":pool2 },
-        { "layer":ConvLayer, "K":512,  "common":conv3 },
-        { "layer":ConvLayer, "K":1024, "common":conv3 },
-        { "layer":ConvLayer, "K":1024, "common":conv3 },
+        { "layer":ConvLayer, "K":512,  "common":conv3, "grid_P":2, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":1024, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":1024, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":PoolLayer, "common":pool2 },
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":3072 },
@@ -81,26 +81,26 @@ networks = {
     # See http://arxiv.org/pdf/1409.1556.pdf for variations
     "VGG" : (
         { "layer":DataLayer, "N":64, "C":3, "H":224, "W":224},
-        { "layer":ConvLayer, "K":64,  "common":conv3 },
+        { "layer":ConvLayer, "K":64,  "common":conv3, np.float16:{"grid_P":4, "grid_Q":224}, np.float32:{"grid_P":224, "grid_Q":4}, "update_size":"C128_K64" },
        #{ "layer":ConvLayer, "K":64,  "common":conv3 },
         { "layer":PoolLayer, "common":pool2 },
-        { "layer":ConvLayer, "K":128, "common":conv3 },
+        { "layer":ConvLayer, "K":128, "common":conv3, np.float16:{"grid_P":1, "grid_Q":28, "update_size":"C128_K128"}, np.float32:{"grid_P":1, "grid_Q":14, "update_size":"C128_K64"} },
        #{ "layer":ConvLayer, "K":128, "common":conv3 },
         { "layer":PoolLayer, "common":pool2 },
-        { "layer":ConvLayer, "K":256, "common":conv3 },
-        { "layer":ConvLayer, "K":256, "common":conv3 },
+        { "layer":ConvLayer, "K":256, "common":conv3, "grid_P":2, "grid_Q":8, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":256, "common":conv3, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
        #{ "layer":ConvLayer, "K":256, "common":conv1 },
        #{ "layer":ConvLayer, "K":256, "common":conv3 },
        #{ "layer":ConvLayer, "K":256, "common":conv3 },
         { "layer":PoolLayer, "common":pool2 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
        #{ "layer":ConvLayer, "K":512, "common":conv1 },
        #{ "layer":ConvLayer, "K":512, "common":conv3 },
        #{ "layer":ConvLayer, "K":512, "common":conv3 },
         { "layer":PoolLayer, "common":pool2 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
        #{ "layer":ConvLayer, "K":512, "common":conv1 },
        #{ "layer":ConvLayer, "K":512, "common":conv3 },
        #{ "layer":ConvLayer, "K":512, "common":conv3 },
@@ -145,34 +145,32 @@ networks = {
     # Here is the biggest VGG model (19 layers)
     "VGG_E" : (
         { "layer":DataLayer, "N":64, "C":3, "H":224, "W":224},
-        { "layer":ConvLayer, "K":64,  "common":conv3 },
-        { "layer":ConvLayer, "K":64,  "common":conv3 }, #, "update_size":"C128_K64"
+        { "layer":ConvLayer, "K":64,  "common":conv3, np.float16:{"grid_P":4, "grid_Q":224}, np.float32:{"grid_P":224, "grid_Q":4}, "update_size":"C128_K64" },
+        { "layer":ConvLayer, "K":64,  "common":conv3, np.float16:{"grid_P":2, "grid_Q":56 }, np.float32:{"grid_P":224, "grid_Q":4}, "update_size":"C128_K64" },
         { "layer":PoolLayer, "common":pool2 },
-        { "layer":ConvLayer, "K":128, "common":conv3 },
-        { "layer":ConvLayer, "K":128, "common":conv3 }, #
+        { "layer":ConvLayer, "K":128, "common":conv3, np.float16:{"grid_P":1, "grid_Q":28, "update_size":"C128_K128"}, np.float32:{"grid_P":1,   "grid_Q":14, "update_size":"C128_K64"} },
+        { "layer":ConvLayer, "K":128, "common":conv3, np.float16:{"grid_P":1, "grid_Q":16, "update_size":"C128_K128"}, np.float32:{"grid_P":112, "grid_Q":4,  "update_size":"C128_K64"} },
         { "layer":PoolLayer, "common":pool2 },
-        { "layer":ConvLayer, "K":256, "common":conv3 },
-        { "layer":ConvLayer, "K":256, "common":conv3 },
-        #{ "layer":ConvLayer, "K":256, "common":conv1 },
-        { "layer":ConvLayer, "K":256, "common":conv3 },
-        { "layer":ConvLayer, "K":256, "common":conv3 },
+        { "layer":ConvLayer, "K":256, "common":conv3, "grid_P":2, "grid_Q":8, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":256, "common":conv3, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
+       #{ "layer":ConvLayer, "K":256, "common":conv1 },
+        { "layer":ConvLayer, "K":256, "common":conv3, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":256, "common":conv3, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":PoolLayer, "common":pool2 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
-        #{ "layer":ConvLayer, "K":512, "common":conv1 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
+       #{ "layer":ConvLayer, "K":512, "common":conv1 },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":PoolLayer, "common":pool2 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
-        #{ "layer":ConvLayer, "K":512, "common":conv1 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
-        { "layer":ConvLayer, "K":512, "common":conv3 },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
+       #{ "layer":ConvLayer, "K":512, "common":conv1 },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
+        { "layer":ConvLayer, "K":512, "common":conv3, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":PoolLayer, "common":pool2 },
         { "layer":FullLayer, "nOut":3072 },
-        #{ "layer":PoolLayer, "common":pool1j2 },
         { "layer":FullLayer, "nOut":3072 },
-        #{ "layer":PoolLayer, "common":pool1j2 },
         { "layer":FullLayer, "nOut":1000 },
     ),
 }
@@ -186,7 +184,7 @@ for net in ("Alexnet","Overfeat","VGG","VGG_E",):
         name    = "%s (dtype=%s, N=%d)" % (net, np.dtype(dtype).name, network[0]["N"])
 
         print("------------------------------------------------")
-        print("Benchmarking:", name)
+        print("Benchmarking: " + name)
         print("------------------------------------------------")
 
         layers = []
@@ -203,6 +201,9 @@ for net in ("Alexnet","Overfeat","VGG","VGG_E",):
             config = dict(conf)
 
             config["dtype"] = dtype
+
+            # merge dtype specific settings
+            config.update(config.pop(dtype, {}))
 
             # merge shared params
             config.update(config.pop("common", {}))
@@ -221,6 +222,11 @@ for net in ("Alexnet","Overfeat","VGG","VGG_E",):
                     config["C"] = prev_layer.K
                     config["H"] = prev_layer.P
                     config["W"] = prev_layer.Q
+
+            # remove unused dtype settings
+            for key in config.keys():
+                if type(key) is not str:
+                    del config[key]
 
             # Instantiate the layer
             layer = layer_type(ng, **config)
@@ -355,7 +361,7 @@ for net in ("Alexnet","Overfeat","VGG","VGG_E",):
         if loops > 0:
 
             print("---------------------------------------------")
-            print(name, "Results:")
+            print(name + " Results:")
             print("---------------------------------------------")
             print("Avg(%d) fprop: %8.3f msecs %.3f gflops" %
                   (loops, fprop_time/loops, fprop_flops / (fprop_time * 1000000.0)))

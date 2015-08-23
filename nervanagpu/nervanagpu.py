@@ -688,6 +688,8 @@ class NervanaGPU(object):
             gflops = layer.flops / (msecs * 1000000.0)
             print("%7.3f msecs %8.3f gflops %6.0f (%s: %s) size:%s grid:%s" %
                   (msecs, gflops, layer.flops/1000000.0, op, layer, size, grid))
+            return msecs, gflops
+        return 0,0
 
     def pool_layer(self, dtype,
             op, N, C,
