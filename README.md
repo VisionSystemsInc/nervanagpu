@@ -139,16 +139,16 @@ Here is a sample run of `benchmarks/convnet-benchmarks.py` using the networks li
     ---------------------------------------------
     Alexnet (dtype=float32, N=128) Results:
     ---------------------------------------------
-    Avg(10) fprop:   29.399 msecs 6064.057 gflops
-    Avg(10) bprop:   67.082 msecs 5315.141 gflops
-    Avg(10) total:   96.481 msecs 5543.344 gflops
+    Avg(10) fprop:   29.332 msecs 6077.931 gflops
+    Avg(10) bprop:   66.216 msecs 5384.625 gflops
+    Avg(10) total:   95.548 msecs 5597.458 gflops
 
     ---------------------------------------------
     Overfeat (dtype=float16, N=128) Results:
     ---------------------------------------------
-    Avg(10) fprop:  107.722 msecs 6647.586 gflops
-    Avg(10) bprop:  236.972 msecs 6043.677 gflops
-    Avg(10) total:  344.694 msecs 6232.408 gflops
+    Avg(10) fprop:  107.401 msecs 6667.444 gflops
+    Avg(10) bprop:  236.339 msecs 6059.859 gflops
+    Avg(10) total:  343.741 msecs 6249.698 gflops
     ---------------------------------------------
     Overfeat (dtype=float32, N=128) Results:
     ---------------------------------------------
@@ -159,28 +159,28 @@ Here is a sample run of `benchmarks/convnet-benchmarks.py` using the networks li
     ---------------------------------------------
     VGG (dtype=float16, N=64) Results:
     ---------------------------------------------
-    Avg(10) fprop:  156.761 msecs 6185.247 gflops
-    Avg(10) bprop:  341.635 msecs 5676.258 gflops
-    Avg(10) total:  498.396 msecs 5836.350 gflops
+    Avg(10) fprop:  153.939 msecs 6298.629 gflops
+    Avg(10) bprop:  337.443 msecs 5746.783 gflops
+    Avg(10) total:  491.382 msecs 5919.665 gflops
     ---------------------------------------------
     VGG (dtype=float32, N=64) Results:
     ---------------------------------------------
-    Avg(10) fprop:  167.904 msecs 5774.753 gflops
-    Avg(10) bprop:  392.034 msecs 4946.530 gflops
-    Avg(10) total:  559.938 msecs 5194.882 gflops
+    Avg(10) fprop:  165.948 msecs 5842.816 gflops
+    Avg(10) bprop:  389.139 msecs 4983.337 gflops
+    Avg(10) total:  555.087 msecs 5240.286 gflops
 
     ---------------------------------------------
     VGG_E (dtype=float16, N=64) Results:
     ---------------------------------------------
-    Avg(10) fprop:  405.705 msecs 6183.168 gflops
-    Avg(10) bprop:  876.252 msecs 5725.624 gflops
-    Avg(10) total: 1281.958 msecs 5870.424 gflops
+    Avg(10) fprop:  396.107 msecs 6332.999 gflops
+    Avg(10) bprop:  854.090 msecs 5874.195 gflops
+    Avg(10) total: 1250.197 msecs 6019.560 gflops
     ---------------------------------------------
     VGG_E (dtype=float32, N=64) Results:
     ---------------------------------------------
-    Avg(10) fprop:  444.173 msecs 5647.681 gflops
-    Avg(10) bprop:  987.882 msecs 5078.635 gflops
-    Avg(10) total: 1432.054 msecs 5255.133 gflops
+    Avg(10) fprop:  435.622 msecs 5758.533 gflops
+    Avg(10) bprop:  971.928 msecs 5162.000 gflops
+    Avg(10) total: 1407.550 msecs 5346.621 gflops
 
 
 #### Acknowledgements
