@@ -1105,7 +1105,7 @@ def call_compound_kernel(rand_state, *args):
                 takeop = True
 
         elif isinstance(arg, ng.GPUTensor):
-            if len(arg.shape) < 2 or arg.shape[0] == 1 or arg.shape[1] == 1:
+            if len(arg.shape) < 2 or (len(arg.shape) == 2 and (arg.shape[0] == 1 or arg.shape[1] == 1)):
                 broadcast = True
             elif arg.is_trans:
                 transpose = True
@@ -1544,7 +1544,7 @@ def _get_kernel_name():
         name = name_re.sub("", name)
         if name:
             names.append(name)
-    names.append(str(caller[1]))
+    #names.append(str(caller[1]))
 
     return names
 

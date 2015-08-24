@@ -22,106 +22,182 @@ import sys
 if sys.version_info >= (3, 0):
     from functools import reduce
 
+
 class Layer(object):
     def __init__(self, lib, dtype, N, dtypeU=None):
-        if dtypeU is None:
-            dtypeU = dtype
-        self.N         = N
-        self.dtype     = dtype
-        self.dtypeU    = dtypeU
-        self.lib       = lib
+        self.N      = N
+        self.dtype  = dtype
+        self.dtypeU = dtype if dtypeU is None else dtypeU
+        self.lib    = lib
+        self.flops  = 0
+        self.sizeI  = 0
+        self.sizeO  = 0
+        self.sizeF  = 0
+        self.weights   = None
         self.fprop_in  = None
         self.fprop_out = None
-        self.bprop_in  = None
         self.bprop_out = None
-        self.weights   = None
-        self.updates   = None
-        self.velocity  = None
-        self.dimF2 = None
-        self.flops = 0
-        self.sizeO = 0
-        self.sizeF = 0
+        self.learning_rate = 0.0
 
     def init_activations(self):
-        self.fprop_out  = self.lib.empty(self.dimO2, dtype=self.dtype)
-        self.act_stats1 = self.lib.empty((self.dimO2[0],1), dtype=np.float32)
-        self.act_stats2 = self.act_stats1[0:1,0:1]
+
+        self.fprop_out = self.lib.empty(self.dimO, dtype=self.dtype)
+
+        self.act_stats = self.lib.empty((self.dimO2[0],1), dtype=np.float32)
 
     def init_deltas(self, shared=None):
+
         if shared is None:
-            self.bprop_in = self.lib.empty(self.dimO2, dtype=self.dtype)
+            self.bprop_out = self.lib.empty(self.dimI, dtype=self.dtype)
         else:
-            self.bprop_in = shared.share(self.dimO2)
+            self.bprop_out = shared.share(self.dimI)
 
-    def init_weights(self, loc=0.0, scale=0.1, shared=None):
-        if self.dimF2 is not None:
-            weights = np.random.normal(loc, scale, self.dimF2)
-            self.weights  = self.lib.array(weights,    dtype=self.dtype)
-            self.velocity = self.lib.zeros(self.dimF2, dtype=self.dtype)
-            if shared is None:
-                self.updates = self.lib.empty(self.dimF2, dtype=self.dtypeU)
+        self.delta_stats = self.lib.empty((self.dimI2[0],1), dtype=np.float32)
+
+    def init_weights(self, loc=0.0, scale=0.1, shared=None, zeros=False):
+
+        if self.sizeF > 0:
+            if zeros:
+                self.weights  = self.lib.zeros(self.dimF, dtype=self.dtype)
             else:
-                self.updates = shared.share(self.dimF2, dtype=self.dtypeU)
+                weights       = np.random.normal(loc, scale, self.dimF)
+                self.weights  = self.lib.array(weights, dtype=self.dtype)
 
-            self.weight_stats1 = self.lib.empty((self.dimF2[0],1), dtype=np.float32)
-            self.weight_stats2 = self.weight_stats1[0:1,0:1]
+            if shared is None:
+                self.updat_out = self.lib.empty(self.dimF, dtype=self.dtypeU)
+            else:
+                self.updat_out = shared.share(self.dimF, dtype=self.dtypeU)
 
-    def connect(self, prev_layer):
-        if prev_layer is not None:
-            self.fprop_in  = prev_layer.fprop_out
-            self.bprop_out = prev_layer.bprop_in
+            self.weight_stats = self.lib.empty((self.dimF2[0],1), dtype=np.float32)
 
-    def reduction_factor(self):
-        return 1.0
+    def scale_weights(self, scale):
 
-    def fprop(self): pass
-    def bprop(self): pass
-    def update(self, momentum, learning_rate): pass
+        mean = self.get_activation_mean()
+        print("Scale weights: %.3f (%.3f) %s" % (scale/mean, scale, self))
+        self.weights *= scale/mean
+
+    def fprop(self, fprop_in, scale_weights=0):
+        if self.fprop_in is None and fprop_in:
+            self.fprop_in = fprop_in.reshape(self.dimI)
+        return self.fprop_in
+
+    def bprop(self, bprop_in):
+        return bprop_in
 
     # fprop relu happens inside of the conv and gemm kernels
-    def bprop_relu(self):
+    def bprop_relu(self, bprop_in):
 
-        self.bprop_in *= self.fprop_out > 0
+        bprop_in *= self.fprop_out > 0
+        return bprop_in
 
-    def grad_descent_momentum(self, momentum, learning_rate):
+    def grad_descent(self):
 
-        self.velocity[:] = self.velocity*momentum - self.updates*learning_rate
-        self.weights += self.velocity
+        self.weights += self.updat_out*self.learning_rate
 
     def get_activation_mean(self):
-        return self._get_mean(self.fprop_out, self.act_stats1, self.act_stats2)
-
-    def get_delta_mean(self, mean=False):
-        return self._get_mean(self.bprop_in, self.act_stats1, self.act_stats2)
-
-    def get_update_mean(self, mean=False):
-        if self.dimF2 is not None:
-            return self._get_mean(self.updates, self.weight_stats1, self.weight_stats2)
-        return self._get_mean(self.bprop_in, self.act_stats1, self.act_stats2)
-
-    def get_weight_mean(self, mean=False):
-        if self.dimF2 is not None:
-            return self._get_mean(self.weights, self.weight_stats1, self.weight_stats2)
-
+        return self._get_mean(self.fprop_out, self.act_stats, self.dimO2)
     def get_activation_max(self):
-        return self._get_max(self.fprop_out, self.act_stats1, self.act_stats2)
+        return self._get_max( self.fprop_out, self.act_stats, self.dimO2)
 
-    def get_delta_max(self, mean=False):
-        return self._get_max(self.bprop_in, self.act_stats1, self.act_stats2)
+    def get_delta_mean(self):
+        return self._get_mean(self.bprop_out, self.delta_stats, self.dimI2)
+    def get_delta_max(self):
+        return self._get_max( self.bprop_out, self.delta_stats, self.dimI2)
 
-    def get_update_max(self, mean=False):
-        if self.dimF2 is not None:
-            return self._get_max(self.updates, self.weight_stats1, self.weight_stats2)
+    def get_update_mean(self):
+        if self.sizeF > 0:
+            return self._get_mean(self.updat_out, self.weight_stats, self.dimF2)
+        return 0
+    def get_update_max(self):
+        if self.sizeF > 0:
+            return self._get_max( self.updat_out, self.weight_stats, self.dimF2)
+        return 0
 
-    def get_weight_max(self, mean=False):
-        if self.dimF2 is not None:
-            return self._get_max(self.weights, self.weight_stats1, self.weight_stats2)
+    def get_weight_mean(self):
+        if self.sizeF > 0:
+            return self._get_mean(self.weights, self.weight_stats, self.dimF2)
+        return 0
+    def get_weight_max(self):
+        if self.sizeF > 0:
+            return self._get_max( self.weights, self.weight_stats, self.dimF2)
+        return 0
 
-    def _get_mean(self, ary, buf1, buf2):
-        return float(self.lib.mean(abs(ary), partial=buf1, out=buf2).get()[0,0])
+    def _get_mean(self, ary, buf, shape):
+        return float(self.lib.mean(abs(ary.reshape(shape)), partial=buf, out=buf[0:1,0:1]).get()[0,0])
 
-    def _get_max(self, ary, buf1, buf2):
-        return float(self.lib.max(abs(ary), partial=buf1, out=buf2).get()[0,0])
+    def _get_max(self, ary, buf, shape):
+        return float(self.lib.max(abs(ary.reshape(shape)), partial=buf, out=buf[0:1,0:1]).get()[0,0])
+
+    def fprop_stats(self):
+        print("fprop:%10.5f mean %11.5f max %s" % (self.get_activation_mean(), self.get_activation_max(), self))
+
+    def bprop_stats(self):
+        if self.bprop_out is not None:
+            print("bprop:%10.5f mean %11.5f max %s" % (self.get_delta_mean(),  self.get_delta_max(), self))
+
+        if self.weights is not None:
+            up_mean, up_max = (self.get_update_mean(), self.get_update_max())
+            wt_mean, wt_max = (self.get_weight_mean(), self.get_weight_max())
+            rt_mean, rt_max = (0.0001 * up_mean/wt_mean, 0.0001 * up_max/wt_max)
+            print("updat:%10.5f mean %11.5f max %s" % (up_mean, up_max, self))
+            print("weigh:%10.5f mean %11.5f max" % (wt_mean, wt_max))
+            print("ratio:%10.5f mean %11.5f max" % (rt_mean, rt_max))
+
+    @staticmethod
+    def create(lib, conf, prev_layer, dtype):
+
+        config     = dict(conf)
+        layer_type = config.pop("layer")
+
+        # merge dtype specific settings
+        config["dtype"] = dtype
+        config.update(config.pop(dtype, {}))
+
+        # merge shared params
+        config.update(config.pop("common", {}))
+
+        #Propagate the fixed and calculated dimensions
+        if prev_layer is not None:
+            config["N"] = prev_layer.N
+
+            if layer_type is FullLayer:
+                config["nIn"] = prev_layer.nOut
+            elif layer_type is PoolLayer and type(prev_layer) is FullLayer:
+                config["C"] = prev_layer.nOut
+            else:
+                config["C"] = prev_layer.K
+                config["H"] = prev_layer.P
+                config["W"] = prev_layer.Q
+
+                if layer_type is Inception:
+                    partitions  = config.pop("partitions")
+                    config["K"] = 0
+
+                    config["partitions"] = []
+                    for part in partitions:
+                        layer_sequence = []
+                        part_prev_layer = prev_layer
+                        for layer_conf in part:
+                            part_prev_layer = Layer.create(lib, layer_conf, part_prev_layer, dtype)
+                            layer_sequence.append(part_prev_layer)
+
+                        last = layer_sequence[-1]
+                        config["partitions"].append(layer_sequence)
+                        config["K"] += last.K
+                        if "P" in config:
+                            assert config["P"] == last.P and config["Q"] == last.Q
+                        else:
+                            config["M"] = last.M
+                            config["P"] = last.P
+                            config["Q"] = last.Q
+
+        # remove unused dtype settings
+        for key in config.keys():
+            if type(key) is not str:
+                del config[key]
+
+        # Instantiate the layer
+        return layer_type(lib, **config)
 
 class DataLayer(Layer):
     def __init__(self, lib, dtype, N, C, D=1, H=1, W=1):
@@ -134,46 +210,67 @@ class DataLayer(Layer):
         self.P = H
         self.Q = W
         self.DHW = (D,H,W)
+        self.dimI   = (C,D,H,W,N)
+        self.dimO   = (C,D,H,W,N)
+        self.dimI2  = (C*D*H*W,N)
         self.dimO2  = (C*D*H*W,N)
+        self.sizeO  = reduce(mul, self.dimO, 1)
+        self.sizeI  = self.sizeO
 
-    def init_data(self, ary):
-        self.fprop_out.set(ary)
+    def init_data(self, ary=None):
+        if ary is None:
+            self.fprop_out.fill(0)
+        else:
+            self.fprop_out.set(ary)
 
     def init_deltas(self, shared=None):  pass
-    def init_weights(self, loc=0.0, scale=0.1, shared=None): pass
+    def init_weights(self, loc=0.0, scale=0.1, shared=None, zeros=False): pass
+
+    def fprop(self, fprop_in, scale_weights=0):
+        return self.fprop_out
 
     def __str__(self):
         return "DataLayer: NCK: (%d, %d, %d) DHW:%s" % (self.N, self.C, self.K, self.DHW)
 
 class FullLayer(Layer):
-    def __init__(self, lib, dtype, N, nIn, nOut, fprop_size=None, bprop_size=None):
+    def __init__(self, lib, dtype, N, nIn, nOut):
 
         super(FullLayer, self).__init__(lib, dtype, N)
 
         self.nIn    = nIn
         self.nOut   = nOut
         self.flops  = N * nIn * nOut * 2.0
-        self.dimF2  = (nOut, nIn)
+        self.dimI   = (nIn,  N)
+        self.dimI2  = (nIn,  N)
+        self.dimO   = (nOut, N)
         self.dimO2  = (nOut, N)
+        self.dimF   = (nOut, nIn)
+        self.dimF2  = (nOut, nIn)
+        self.sizeI  = nIn  * N
         self.sizeO  = nOut * N
-        self.sizeF  = nIn * nOut
+        self.sizeF  = nIn  * nOut
 
-        self.fprop_size = fprop_size
-        self.bprop_size = bprop_size
+    def fprop(self, fprop_in, scale_weights=0):
 
-    def fprop(self):
+        fprop_in = super(FullLayer, self).fprop(fprop_in)
+        self.lib.dot(self.weights, fprop_in, self.fprop_out, relu=True)
 
-        self.lib.dot(self.weights, self.fprop_in, self.fprop_out, relu=True, size=self.fprop_size)
+        if scale_weights:
+            self.scale_weights(scale_weights)
+            self.fprop(fprop_in)
 
-    def bprop(self):
+        return self.fprop_out
 
-        self.bprop_relu()
-        self.lib.dot(self.weights.T, self.bprop_in, self.bprop_out, size=self.bprop_size)
+    def bprop(self, bprop_in):
 
-    def update(self, momentum, learning_rate):
+        self.bprop_relu(bprop_in)
+        self.lib.dot(self.weights.T, bprop_in, self.bprop_out)
 
-        self.lib.dot(self.bprop_in, self.fprop_in.T, self.updates)
-        self.grad_descent_momentum(momentum, learning_rate)
+        self.lib.dot(bprop_in, self.fprop_in.T, self.updat_out)
+        self.grad_descent()
+
+        return self.bprop_out
+
 
     def __str__(self):
         return "FullLayer: N, nIn, nOut: (%d, %d, %d)" % (self.N, self.nIn, self.nOut)
@@ -380,17 +477,26 @@ class ConvLayer(Layer):
             self.shuffle_block = (32,8,1)
             self.bprop_zero    = True
 
-    def fprop(self):
-            self.lib.fprop_conv(self, self.fprop_in, self.weights, self.fprop_out, relu=True)
+    def fprop(self, fprop_in, scale_weights=0):
 
-    def bprop(self):
-            self.bprop_relu()
+        fprop_in = super(ConvLayer, self).fprop(fprop_in)
+        self.lib.fprop_conv(self, fprop_in, self.weights, self.fprop_out, relu=True)
+
+        if scale_weights:
+            self.scale_weights(scale_weights)
+            self.fprop(fprop_in)
+
+        return self.fprop_out
+
+    def bprop(self, bprop_in):
+            self.bprop_relu(bprop_in)
             if self.bprop_out is not None:
-                self.lib.bprop_conv(self, self.weights, self.bprop_in, self.bprop_out)
+                self.lib.bprop_conv(self, self.weights, bprop_in, self.bprop_out)
 
-    def update(self, momentum, learning_rate):
-            self.lib.update_conv(self, self.fprop_in, self.bprop_in, self.updates)
-            self.grad_descent_momentum(momentum, learning_rate)
+            self.lib.update_conv(self, self.fprop_in, bprop_in, self.updat_out)
+            self.grad_descent()
+
+            return self.bprop_out
 
     def __str__(self):
         return "ConvLayer: NCK: (%d, %d, %d) DHW:%s TRS:%s MPQ:%s" % \
@@ -484,18 +590,133 @@ class PoolLayer(Layer):
         # shared lookup table size
         self.lut_size = (JRST // 32 + (JRST  % 32 != 0)) * 32 * 4
 
-    def fprop(self):
-        self.lib.fprop_pool(self, self.fprop_in, self.fprop_out)
+    def fprop(self, fprop_in, scale_weights=0):
 
-    def bprop(self):
-        self.lib.bprop_pool(self, self.fprop_in, self.bprop_in, self.bprop_out)
+        fprop_in = super(PoolLayer, self).fprop(fprop_in)
+        self.lib.fprop_pool(self, fprop_in, self.fprop_out)
+        return self.fprop_out
 
-    def reduction_factor(self):
-        return float(self.dimI2[0]) / float(self.dimO2[0])
+    def bprop(self, bprop_in):
+        self.lib.bprop_pool(self, self.fprop_in, bprop_in, self.bprop_out)
+        return self.bprop_out
 
     def __str__(self):
         return "PoolLayer: NCK: (%d, %d, %d) DHW:%s JTRS:%s MPQ:%s op: %s " % \
                 (self.N, self.C, self.K, self.DHW, self.JTRS, self.MPQ, self.op)
+
+
+class Inception(Layer):
+
+    def __init__(self, lib, dtype, partitions,
+            N, C, K,
+            D=1, H=1, W=1,
+            M=1, P=1, Q=1):
+
+        super(Inception, self).__init__(lib, dtype, N)
+
+        self.partitions = partitions
+
+        self.C = C
+        self.K = K
+        self.M = M
+        self.P = P
+        self.Q = Q
+        self.NCK = (N,C,K)
+        self.DHW = (D,H,W)
+        self.MPQ = (M,P,Q)
+
+        self.dimI   = (C,D,H,W,N)
+        self.dimO   = (K,M,P,Q,N)
+        self.dimI2  = (C*D*H*W,N)
+        self.dimO2  = (K*M*P*Q,N)
+        self.sizeI  = reduce(mul, self.dimI, 1)
+        self.sizeO  = reduce(mul, self.dimO, 1)
+        self.nOut   = reduce(mul, self.MPQ,  1) * K
+
+        self.sizeF = 0
+        self.flops = 0
+        for part in partitions:
+            for layer in part:
+                self.flops += layer.flops
+                self.sizeF  = max(self.sizeF, layer.sizeF)
+                if self.sizeF == layer.sizeF:
+                    self.dimF = layer.dimF
+
+    def __str__(self):
+        out = "Inception: NCK: (%d, %d, %d) DHW:%s MPQ:%s\n" % (self.N, self.C, self.K, self.DHW, self.MPQ)
+        for i, part in enumerate(self.partitions):
+            out += "  Part%d:\n" % (i+1)
+            for layer in part:
+                out += "    %s\n" % layer
+        return out.rstrip()
+
+    def init_activations(self):
+
+        super(Inception, self).init_activations()
+        K = 0
+        for part in self.partitions:
+            for layer in part:
+                if layer is part[-1]:
+                    layer.fprop_out = self.fprop_out[K:K+layer.K,...]
+                    K += layer.K
+
+                    layer.act_stats = self.lib.empty((layer.dimO2[0],1), dtype=np.float32)
+
+                else:
+                    layer.init_activations()
+
+    def init_deltas(self, shared=None):
+
+        super(Inception, self).init_deltas(shared)
+
+        for part in self.partitions:
+            for layer in part:
+                if layer is part[0]:
+                    layer.bprop_out   = self.bprop_out
+                    layer.delta_stats = self.lib.empty((layer.dimI2[0],1), dtype=np.float32)
+                else:
+                    #TODO: share intermediate deltas
+                    layer.init_deltas()
+
+    def init_weights(self, loc=0.0, scale=0.1, shared=None, zeros=False):
+
+        for part in self.partitions:
+            for layer in part:
+                layer.init_weights(loc, scale, shared, zeros)
+
+    def fprop(self, fprop_in, scale_weights=0):
+
+        fprop_in = super(Inception, self).fprop(fprop_in)
+
+        for part in self.partitions:
+            part_fprop_in = fprop_in
+            for layer in part:
+                part_fprop_in = layer.fprop(part_fprop_in, scale_weights)
+
+        return self.fprop_out
+
+    def bprop(self, bprop_in):
+
+        K = self.K
+        for part in self.partitions[::-1]:
+            part_bprop_in = bprop_in[K-part[-1].K:K,...]
+            #import ipdb; ipdb.set_trace()
+            K -= part[-1].K
+            for layer in part[::-1]:
+                #TODO: we need to accumulate the delta in the common output delta
+                part_bprop_in = layer.bprop(part_bprop_in)
+
+        return self.bprop_out
+
+    def fprop_stats(self):
+        for part in self.partitions:
+            for layer in part:
+                layer.fprop_stats()
+
+    def bprop_stats(self):
+        for part in self.partitions[::-1]:
+            for layer in part[::-1]:
+                layer.bprop_stats()
 
 # Magic numbers and shift amounts for integer division
 # Suitable for when nmax*magic fits in 32 bits
