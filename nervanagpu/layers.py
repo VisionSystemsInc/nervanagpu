@@ -50,7 +50,8 @@ class Layer(object):
         if shared is None:
             self.bprop_out = self.lib.empty(self.dimI, dtype=self.dtype)
         else:
-            self.bprop_out = shared.share(self.dimI)
+            self.bprop_out = shared[0].share(self.dimI)
+            shared.reverse()
 
         self.delta_stats = self.lib.empty((self.dimI2[0],1), dtype=np.float32)
 
@@ -73,7 +74,7 @@ class Layer(object):
     def scale_weights(self, scale):
 
         mean = self.get_activation_mean()
-        print("Scale weights: %.3f (%.3f) %s" % (scale/mean, scale, self))
+        #print("Scale weights: %.3f (%.3f) %s" % (scale/mean, scale, self))
         self.weights *= scale/mean
 
     def fprop(self, fprop_in, scale_weights=0):
@@ -669,14 +670,15 @@ class Inception(Layer):
 
         super(Inception, self).init_deltas(shared)
 
+        shared_deltas = shared[1:3]
+
         for part in self.partitions:
             for layer in part:
                 if layer is part[0]:
                     layer.bprop_out   = self.bprop_out
                     layer.delta_stats = self.lib.empty((layer.dimI2[0],1), dtype=np.float32)
                 else:
-                    #TODO: share intermediate deltas
-                    layer.init_deltas()
+                    layer.init_deltas(shared=shared_deltas)
 
     def init_weights(self, loc=0.0, scale=0.1, shared=None, zeros=False):
 

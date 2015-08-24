@@ -752,7 +752,7 @@ class NervanaGPU(object):
 
         b_data = 0 if B is None else B.gpudata
 
-        kernel = _get_pool_kernel(self.cubin_path, clss, layer.op)
+        kernel = _get_pool_kernel(self.cubin_path, clss, "max")
         params = [layer.grid, layer.block, self.stream, I.gpudata, O.gpudata, b_data, mode]
         params.extend(layer.kernel_args)
 

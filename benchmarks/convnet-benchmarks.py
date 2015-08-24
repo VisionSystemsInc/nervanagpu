@@ -26,10 +26,10 @@ print(context.get_device().name())
 # Available nets:
 # "Alexnet","Overfeat","VGG", "Alexnet2","Overfeat2","VGG_E","GoogLeNet1","GoogLeNet2"
 # Note GoogLeNet2 only fits in fp16 currently.  I need to work out delta sharing in inception layers.
-nets = ("Alexnet",)
+nets = ("Alexnet","Overfeat","GoogLeNet1","GoogLeNet2","VGG","VGG_E",)
 
 #Available dtypes: np.float16, np.float32
-dtypes = (np.float16,np.float32)
+dtypes = (np.float32,)
 
 # number of full iterations
 loops       = 10
@@ -42,26 +42,22 @@ zeros       = 0
 
 ng = NervanaGPU(bench=layer_bench)
 
-# don't learn, just benchmark
-momentum      = 0.0
-learning_rate = 0.0
-
 # common convolutional layer settings
-conv11   = { "R":11, "S":11, "pad_h":2, "pad_w":2, "str_h":4, "str_w":4 }
-conv11p0 = { "R":11, "S":11, "pad_h":0, "pad_w":0, "str_h":4, "str_w":4 }
-conv7    = { "R":7,  "S":7,  "pad_h":3, "pad_w":3, "str_h":2, "str_w":2 }
-conv5    = { "R":5,  "S":5,  "pad_h":2, "pad_w":2 }
-conv5p0  = { "R":5,  "S":5,  "pad_h":0, "pad_w":0 }
-conv3    = { "R":3,  "S":3,  "pad_h":1, "pad_w":1 }
-conv2    = { "R":2,  "S":2,  "pad_h":0, "pad_w":0 }
-conv1    = { "R":1,  "S":1,  "pad_h":0, "pad_w":0 }
+conv11    = { "R":11, "S":11, "pad_h":2, "pad_w":2, "str_h":4, "str_w":4 }
+conv11p0  = { "R":11, "S":11, "pad_h":0, "pad_w":0, "str_h":4, "str_w":4 }
+conv7     = { "R":7,  "S":7,  "pad_h":3, "pad_w":3, "str_h":2, "str_w":2 }
+conv5     = { "R":5,  "S":5,  "pad_h":2, "pad_w":2 }
+conv5p0   = { "R":5,  "S":5,  "pad_h":0, "pad_w":0 }
+conv3     = { "R":3,  "S":3,  "pad_h":1, "pad_w":1 }
+conv2     = { "R":2,  "S":2,  "pad_h":0, "pad_w":0, "str_h":2, "str_w":2 }
+conv1     = { "R":1,  "S":1,  "pad_h":0, "pad_w":0 }
 
 # traditional pooling
-pool2s2p0 = { "op":"max", "R":2, "S":2 }
-pool3s2p0 = { "op":"max", "R":3, "S":3, "str_h":2, "str_w":2 }
-pool3s2p1 = { "op":"max", "R":3, "S":3, "str_h":2, "str_w":2, "pad_h":1, "pad_w":1 }
-pool3s1p1 = { "op":"max", "R":3, "S":3, "str_h":1, "str_w":1, "pad_h":1, "pad_w":1 }
-pool7s1p0 = { "op":"max", "R":7, "S":7, "str_h":1, "str_w":1 }
+pool2s2p0 = { "R":2, "S":2 }
+pool3s2p0 = { "R":3, "S":3, "str_h":2, "str_w":2 }
+pool3s2p1 = { "R":3, "S":3, "str_h":2, "str_w":2, "pad_h":1, "pad_w":1 }
+pool3s1p1 = { "R":3, "S":3, "str_h":1, "str_w":1, "pad_h":1, "pad_w":1 }
+pool7s1p0 = { "R":7, "S":7, "str_h":1, "str_w":1 }
 
 # maxout pooling
 pool1j2 = { "op":"max", "J":2 } # maxout in the fc layers
@@ -106,7 +102,6 @@ def inception2(conf):
             { "layer":ConvLayer, "K":conf[2][1], "common":conv3, },
             { "layer":ConvLayer, "K":conf[2][1], "common":conv3, },
         ),
-
     ) )
     if conf[3][1]:
         partitions.append( (
@@ -124,13 +119,13 @@ networks = {
         { "warmup":5 },
         { "layer":DataLayer, "N":128, "C":3, "H":224, "W":224},
         { "layer":ConvLayer, "common":conv11,"K":64,  "grid_P":55, "grid_Q":5, "update_size":"C128_K64"  },
-        { "layer":PoolLayer, "common":pool3s2p0 },
+        { "layer":PoolLayer, "common":pool3s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv5, "K":192, "grid_P":1,  "grid_Q":9, "update_size":"C128_K64"  },
-        { "layer":PoolLayer, "common":pool3s2p0 },
+        { "layer":PoolLayer, "common":pool3s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":384, "grid_P":13, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":256, "grid_P":13, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":256, "grid_P":13, "grid_Q":1, "update_size":"C128_K128" },
-        { "layer":PoolLayer, "common":pool3s2p0 },
+        { "layer":PoolLayer, "common":pool3s2p0, "op":"max" },
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":1000 },
@@ -139,13 +134,13 @@ networks = {
         { "warmup":1 },
         { "layer":DataLayer, "N":128, "C":3, "H":231, "W":231},
         { "layer":ConvLayer, "common":conv11p0,"K":96,   "grid_P":2, "grid_Q":8, "update_size":"C128_K128" },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv5p0, "K":256, np.float16:{"grid_P":3, "grid_Q":3, "update_size":"C128_K64"}, np.float32:{"grid_P":2, "grid_Q":3, "update_size":"C128_K128"} },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3,   "K":512,  "grid_P":2, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3,   "K":1024, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3,   "K":1024, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":1000 },
@@ -155,19 +150,19 @@ networks = {
         { "warmup":1 },
         { "layer":DataLayer, "N":64, "C":3, "H":224, "W":224},
         { "layer":ConvLayer, "common":conv3, "K":64, np.float16:{"grid_P":4, "grid_Q":224}, np.float32:{"grid_P":224, "grid_Q":4}, "update_size":"C128_K64" },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":128, np.float16:{"grid_P":1, "grid_Q":28, "update_size":"C128_K128"}, np.float32:{"grid_P":1, "grid_Q":14, "update_size":"C128_K64"} },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":256, "grid_P":2, "grid_Q":8, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":256, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
 
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":1000 },
@@ -178,25 +173,25 @@ networks = {
         { "layer":DataLayer, "N":64, "C":3, "H":224, "W":224},
         { "layer":ConvLayer, "common":conv3, "K":64,  np.float16:{"grid_P":4, "grid_Q":224}, np.float32:{"grid_P":224, "grid_Q":4}, "update_size":"C128_K64" },
         { "layer":ConvLayer, "common":conv3, "K":64,  np.float16:{"grid_P":2, "grid_Q":56 }, np.float32:{"grid_P":224, "grid_Q":4}, "update_size":"C128_K64" },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":128, np.float16:{"grid_P":1, "grid_Q":28, "update_size":"C128_K128"}, np.float32:{"grid_P":1,   "grid_Q":14, "update_size":"C128_K64"} },
         { "layer":ConvLayer, "common":conv3, "K":128, np.float16:{"grid_P":1, "grid_Q":16, "update_size":"C128_K128"}, np.float32:{"grid_P":112, "grid_Q":4,  "update_size":"C128_K64"} },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":256, "grid_P":2, "grid_Q":8, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":256, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":256, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":256, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
-        { "layer":PoolLayer, "common":pool2s2p0 },
+        { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":1000 },
@@ -205,19 +200,19 @@ networks = {
         { "warmup":1 },
         { "layer":DataLayer, "N":128, "C":3, "H":224, "W":224 },
         { "layer":ConvLayer, "common":conv7, "K":64  },
-        { "layer":PoolLayer, "common":pool3s2p1      },
+        { "layer":PoolLayer, "common":pool3s2p1, "op":"max" },
         { "layer":ConvLayer, "common":conv1, "K":64  },
         { "layer":ConvLayer, "common":conv3, "K":192 },
-        { "layer":PoolLayer, "common":pool3s2p1      },
+        { "layer":PoolLayer, "common":pool3s2p1, "op":"max" },
         inception1( [(64, ),(96, 128),(16, 32),(32, )] ),
         inception1( [(128,),(128,192),(32, 96),(64, )] ),
-        { "layer":PoolLayer, "common":pool3s2p1 },
+        { "layer":PoolLayer, "common":pool3s2p1, "op":"max" },
         inception1( [(192,),(96, 208),(16, 48),(64, )] ),
         inception1( [(160,),(112,224),(24, 64),(64, )] ),
         inception1( [(128,),(128,256),(24, 64),(64, )] ),
         inception1( [(112,),(144,288),(32, 64),(64, )] ),
         inception1( [(256,),(160,320),(32,128),(128,)] ),
-        { "layer":PoolLayer, "common":pool3s2p1 },
+        { "layer":PoolLayer, "common":pool3s2p1, "op":"max" },
         inception1( [(256,),(160,320),(32,128),(128,)] ),
         inception1( [(384,),(192,384),(48,128),(128,)] ),
         { "layer":PoolLayer, "common":pool7s1p0, "op":"avg" },
@@ -227,10 +222,10 @@ networks = {
         { "warmup":1 },
         { "layer":DataLayer, "N":128, "C":3, "H":224, "W":224 },
         { "layer":ConvLayer, "common":conv7, "K":64  },
-        { "layer":PoolLayer, "common":pool3s2p1      },
+        { "layer":PoolLayer, "common":pool3s2p1, "op":"max" },
         { "layer":ConvLayer, "common":conv1, "K":64  },
         { "layer":ConvLayer, "common":conv3, "K":192 },
-        { "layer":PoolLayer, "common":pool3s2p1      },
+        { "layer":PoolLayer, "common":pool3s2p1, "op":"max" },
         inception2( [( 64,),( 64, 64),( 64, 96),('avg', 32)] ),
         inception2( [( 64,),( 64, 96),( 64, 96),('avg', 64)] ),
         inception2( [(  0,),(128,160),( 64, 96),('max',  0)] ),
@@ -267,13 +262,15 @@ for net in nets:
         max_delta_layer  = None
         max_weight_layer = None
         shared_weights   = None
-        shared_deltas    = [0,0]
-
-
+        shared_deltas    = []
+        inception        = False
 
         for conf in network:
 
             layer = Layer.create(ng, conf, prev_layer, dtype)
+
+            if type(layer) is Inception:
+                inception = True
 
             # find the size of the largest buffers so they can be shared
             if layer.sizeF > max_weights:
@@ -287,16 +284,14 @@ for net in nets:
             prev_layer = layer
             layers.append(layer)
 
-        #exit()
-        #import ipdb; ipdb.set_trace()
-
-        # for layer in sorted(layers, key=lambda l: l.sizeO, reverse=True):
-        #     print("%d %s" % (layer.sizeO, layer))
-
         # Init shared buffers (assumes consistent dtype for now)
-        shared_deltas[0] = ng.empty(max_delta_layer.dimI,  dtype=max_delta_layer.dtype)
-        shared_deltas[1] = ng.empty(max_delta_layer.dimI,  dtype=max_delta_layer.dtype)
-        shared_updates   = ng.empty(max_weight_layer.dimF, dtype=np.float32)
+        shared_deltas.append(ng.empty(max_delta_layer.dimI, dtype=max_delta_layer.dtype))
+        shared_deltas.append(ng.empty(max_delta_layer.dimI, dtype=max_delta_layer.dtype))
+        if inception:
+            shared_deltas.append(ng.empty(max_delta_layer.dimI, dtype=max_delta_layer.dtype))
+            shared_deltas.append(ng.empty(max_delta_layer.dimI, dtype=max_delta_layer.dtype))
+
+        shared_updates = ng.empty(max_weight_layer.dimF, dtype=np.float32)
 
         for i, layer in enumerate(layers):
             print(layer)
@@ -306,8 +301,7 @@ for net in nets:
             layer.init_activations()
             layer.init_weights(shared=shared_updates, zeros=zeros)
             if i > 1:
-                layer.init_deltas(shared=shared_deltas[0])
-                shared_deltas.reverse()
+                layer.init_deltas(shared=shared_deltas)
 
         remain, total = drv.mem_get_info()
         print("%.3fGB of %.3fGB Allocated (%.3fGB Remaining)" %
