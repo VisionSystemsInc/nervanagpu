@@ -24,12 +24,12 @@ print(context.get_device().name())
 # https://github.com/soumith/convnet-benchmarks
 
 # Available nets:
-# "Alexnet","Overfeat","VGG", "Alexnet2","Overfeat2","VGG_E","GoogLeNet1","GoogLeNet2"
+# "Alexnet","Overfeat","VGG","GoogLeNet1","GoogLeNet2","VGG_E"
 # Note GoogLeNet2 only fits in fp16 currently.  I need to work out delta sharing in inception layers.
-nets = ("Alexnet","Overfeat","GoogLeNet1","GoogLeNet2","VGG","VGG_E",)
+nets = ("Alexnet","Overfeat","VGG","GoogLeNet1","GoogLeNet2","VGG_E")
 
 #Available dtypes: np.float16, np.float32
-dtypes = (np.float32,)
+dtypes = (np.float16,np.float32,)
 
 # number of full iterations
 loops       = 10
@@ -39,6 +39,9 @@ layer_bench = 0
 print_stats = 0
 # run network with all zeros to see speed difference
 zeros       = 0
+# print more stuff
+verbose     = 0
+
 
 ng = NervanaGPU(bench=layer_bench)
 
@@ -155,7 +158,6 @@ networks = {
         { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":256, "grid_P":2, "grid_Q":8, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":256, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
-
         { "layer":PoolLayer, "common":pool2s2p0, "op":"max" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":4, "grid_Q":1, "update_size":"C128_K128" },
         { "layer":ConvLayer, "common":conv3, "K":512, "grid_P":1, "grid_Q":1, "update_size":"C128_K128" },
@@ -196,6 +198,7 @@ networks = {
         { "layer":FullLayer, "nOut":3072 },
         { "layer":FullLayer, "nOut":1000 },
     ),
+    # http://arxiv.org/abs/1502.03167
     "GoogLeNet1" : (
         { "warmup":1 },
         { "layer":DataLayer, "N":128, "C":3, "H":224, "W":224 },
@@ -218,6 +221,7 @@ networks = {
         { "layer":PoolLayer, "common":pool7s1p0, "op":"avg" },
         { "layer":FullLayer, "nOut":1000 },
     ),
+    # adapted from: https://github.com/soumith/kaggle_retinopathy_starter.torch/blob/master/models/googlenet_cudnn.lua
     "GoogLeNet2" : (
         { "warmup":1 },
         { "layer":DataLayer, "N":128, "C":3, "H":224, "W":224 },
@@ -294,7 +298,8 @@ for net in nets:
         shared_updates = ng.empty(max_weight_layer.dimF, dtype=np.float32)
 
         for i, layer in enumerate(layers):
-            print(layer)
+            if verbose:
+                print(layer)
 
             # Intitalize buffers.  Alernate shared delta buffer.
             # One layer can't have the same buffer for both error in and error out.
@@ -303,9 +308,10 @@ for net in nets:
             if i > 1:
                 layer.init_deltas(shared=shared_deltas)
 
-        remain, total = drv.mem_get_info()
-        print("%.3fGB of %.3fGB Allocated (%.3fGB Remaining)" %
-              ((total-remain)/1024.**3, total/1024.**3, remain/1024.**3))
+        if verbose:
+            remain, total = drv.mem_get_info()
+            print("%.3fGB of %.3fGB Allocated (%.3fGB Remaining)" %
+                  ((total-remain)/1024.**3, total/1024.**3, remain/1024.**3))
 
         if zeros:
             layers[0].init_data()
