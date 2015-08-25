@@ -295,7 +295,9 @@ class ConvLayer(Layer):
 
         # Compute the output spatial dimensions
         M = int(ceil(float(D - T + 1 + 2*pad_d) / str_d))
+        #if not P:
         P = int(ceil(float(H - R + 1 + 2*pad_h) / str_h))
+        #if not Q:
         Q = int(ceil(float(W - S + 1 + 2*pad_w) / str_w))
 
         self.C = C
@@ -502,6 +504,38 @@ class ConvLayer(Layer):
     def __str__(self):
         return "ConvLayer: NCK: (%d, %d, %d) DHW:%s TRS:%s MPQ:%s" % \
                 (self.N, self.C, self.K, self.DHW, self.TRS, self.MPQ)
+
+# Add Deconv class
+class DeconvLayer(ConvLayer):
+
+    def __init__(self, lib, dtype,
+            N, C, K,
+            P, Q,
+            R=1, S=1,
+            pad_d=0, pad_h=0, pad_w=0,
+            str_d=1, str_h=1, str_w=1,
+            grid_P=0, grid_Q=0, update_size=None):
+
+        # Set T, M and D to be consts.
+        D = M = T = 1
+
+        # Cannot get exact, e.g. because not unique
+        H = (P-1) * str_h - 2 * pad_h + R
+        W = (Q-1) * str_w - 2 * pad_w + S
+
+        super(DeconvLayer, self).__init__(
+            lib, dtype,
+            N, C, K,
+            D, H, W,
+            T, R, S,
+            pad_d, pad_h, pad_w,
+            str_d, str_h, str_w,
+            grid_P, grid_Q, update_size)
+
+    def __str__(self):
+        return "DeconvLayer: NCK: (%d, %d, %d) DHW:%s TRS:%s MPQ:%s" % \
+                (self.N, self.C, self.K, self.DHW, self.TRS, self.MPQ)
+
 
 class PoolLayer(Layer):
 

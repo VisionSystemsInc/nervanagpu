@@ -20,7 +20,7 @@ from pycuda.tools import context_dependent_memoize
 from struct import unpack_from
 from pytools import memoize, memoize_method
 from .float_ew import call_compound_kernel, fp32_convert, _get_compensated_sum_kernel, _get_fast_ew_dims, _get_transpose_kernel, _get_shuffle_kernel
-from .layers import DataLayer, FullLayer, ConvLayer, PoolLayer, _get_sm_count
+from .layers import DataLayer, FullLayer, ConvLayer, DeconvLayer, PoolLayer, _get_sm_count
 
 if sys.version_info >= (3, 0):
     from functools import reduce
@@ -577,9 +577,8 @@ class NervanaGPU(object):
         L2 cache utilization is greatly effected by them.
 
         update_size: override kernel size selection for update.
-            "C64_K64"   (fp16 only)
-            "C128_K64"  (fp32 only)
-            "C128_K128" (both)
+            "C128_K64"
+            "C128_K128"
 
         dtype: need to know dtype to setup proper kernels and params.
 
@@ -589,8 +588,58 @@ class NervanaGPU(object):
         return ConvLayer(self, dtype, N, C, K, D, H, W, T, R, S,
             pad_d, pad_h, pad_w, str_d, str_h, str_w, grid_P, grid_Q, update_size)
 
-    def fprop_conv(self, layer, I, F, O, alpha=1.0, relu=False, repeat=1):
+    def deconv_layer(self, dtype,
+            N, C, K,
+            P, Q,
+            R=1, S=1,
+            pad_d=0, pad_h=0, pad_w=0,
+            str_d=1, str_h=1, str_w=1,
+            grid_P=0, grid_Q=0, update_size=None):
+        """
+        Create a new DeconvLayer parameter object.
+        This then is passed as an argument to all the convolution operations.
 
+        N: Number of images in mini-batch
+        C: Number of output feature maps
+        K: Number of input feature maps
+
+        P: Height of input
+        Q: Width of input
+
+        T: Depth  of filter kernel
+        R: Height of filter kernel
+        S: Width  of filter kernel
+
+        padding: amount of zero-padding around the given edge
+        strides: factor to step the filters by in a given direction
+
+        grid_P, grid_Q: For the update operation define the size of the grid
+        to distribute the work accross SMs.  The smaller the grid, the deeper the
+        MM and hence more accumulation is done in fp32.  The bigger the grid,
+        the more the work can be evenly spanned accross the SMs, at the cost of
+        needing more fp16 accumuation operations and increased error.
+
+        Set to 1,1 for full fp32 accuracy
+        Set to P,Q for maximal distribution of work acrross SMs
+        Set to 0,0 for automactially calculated optimal balance (recommened).
+
+        Tweaking these params can have a large impact on performance as the
+        L2 cache utilization is greatly effected by them.
+
+        update_size: override kernel size selection for update.
+            "C128_K64"
+            "C128_K128"
+
+        dtype: need to know dtype to setup proper kernels and params.
+
+        Maximum utilization is achieved when N, K and C*R*S*T is
+        a multiple of 64
+        """
+        return DeconvLayer(self, dtype, N, C, K, P, Q, R, S,
+            pad_d, pad_h, pad_w, str_d, str_h, str_w, grid_P, grid_Q, update_size)
+
+
+    def fprop_conv(self, layer, I, F, O, alpha=1.0, relu=False, repeat=1):
         assert layer.sizeI == I.size
         assert layer.sizeF == F.size
         assert layer.sizeO == O.size
@@ -601,18 +650,15 @@ class NervanaGPU(object):
             I, F, O, alpha, relu, False, repeat)
 
     def bprop_conv(self, layer, F, E, grad_I, alpha=1.0, repeat=1):
-
         assert layer.sizeF == F.size
         assert layer.sizeO == E.size
         assert layer.sizeI == grad_I.size
-
         return self._execute_conv(
             layer, "bprop", layer.bprop_size,
             layer.bprop_grid, layer.bprop_block, layer.bprop_args, layer.bprop_lut_size,
             E, F, grad_I, alpha, False, layer.bprop_zero, repeat)
 
     def update_conv(self, layer, I, E, grad_F, alpha=1.0, repeat=1):
-
         assert layer.sizeI == I.size
         assert layer.sizeO == E.size
         assert layer.sizeF == grad_F.size
@@ -671,10 +717,6 @@ class NervanaGPU(object):
 
             if shuffle_kernel:
                 shuffle_kernel.prepared_async_call(*shuffle_args)
-                # ary = np.empty(layer.dimF2t, B.dtype)
-                # drv.memcpy_dtoh_async(ary, B_gpudata, None)
-                # print ary - B.get().reshape(layer.dimF2).T
-                # exit()
 
             kernel.prepared_async_call(*params, shared_size=shared)
 
@@ -1037,7 +1079,6 @@ class NervanaGPU(object):
             lda, ldb, ldc, m, n, k,
             alpha, beta, flags, 0, 0, 0, 0 ]
 
-        #import ipdb; ipdb.set_trace()
 
         # Warmup
         if repeat > 1:
@@ -1070,7 +1111,6 @@ class NervanaGPU(object):
             cmp_tensor.kahan_count = 0
 
         assert sum_tensor.dtype.type == cmp_tensor.dtype.type == add_tensor.dtype.type
-        #import ipdb; ipdb.set_trace()
 
         cmp_tensor.kahan_count += 1
 
