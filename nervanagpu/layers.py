@@ -676,7 +676,7 @@ class Inception(Layer):
             for layer in part:
                 if layer is part[0]:
                     layer.bprop_out   = self.bprop_out
-                    layer.delta_stats = self.lib.empty((layer.dimI2[0],1), dtype=np.float32)
+                    layer.delta_stats = self.delta_stats
                 else:
                     layer.init_deltas(shared=shared_deltas)
 
