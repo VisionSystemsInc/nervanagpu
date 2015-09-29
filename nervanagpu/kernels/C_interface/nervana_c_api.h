@@ -47,7 +47,7 @@ bool nervana_unloadKernels();
  *  all matrices to be in row-major order.
  *  \param [in] A Pointer to the data for matrix A
  *  \param [in] B Pointer to the data for matrix B
- *  \param [in] C Pointer to the data for matrix C
+ *  \param [in, out] C Pointer to the data for matrix C
  *  \param [in] m number of rows of C
  *  \param [in] n number of columns of C
  *  \param [in] k inner dimension of multiplication
@@ -56,12 +56,13 @@ bool nervana_unloadKernels();
  *  \param [in] ldc leading dimension of two-dimensional array C
  *  \param [in] alpha scalar used for multiplication
  *  \param [in] beta scalar used for multiplication
- *  \param [in] rand_state pointer to memory used for random state
+ *  \param [in, out] rand_state pointer to memory used for random state
  *              use nervana_randStateSizeBytes to allocate the correct size
  *              if stochastic_round is false, this can be NULL
  *  \param [in] stochastic_round true if stochastic rounding should be used
  *  \param [in] apply_relu true if a relu should be applied to the result
  *  \param [in] stream The cudaStream on which the kernel should be launched
+ *  \param [in] grid Choose a specific grid configuration: 0=32x128, 1=128x32, 2=128x64, 3=128x128
  */
  bool nervana_sgemm(float *A, float *B, float *C,
                     bool a_t, bool b_t,
@@ -79,7 +80,7 @@ bool nervana_unloadKernels();
  *  all matrices to be in row-major order.
  *  \param [in] A Pointer to the data for matrix A
  *  \param [in] B Pointer to the data for matrix B
- *  \param [in] C Pointer to the data for matrix C
+ *  \param [in, out] C Pointer to the data for matrix C
  *  \param [in] m number of rows of C
  *  \param [in] n number of columns of C
  *  \param [in] k inner dimension of multiplication
@@ -88,12 +89,13 @@ bool nervana_unloadKernels();
  *  \param [in] ldc leading dimension of two-dimensional array C
  *  \param [in] alpha scalar used for multiplication
  *  \param [in] beta scalar used for multiplication
- *  \param [in] rand_state pointer to memory used for random state
+ *  \param [in, out] rand_state pointer to memory used for random state
  *              use nervana_randStateSizeBytes to allocate the correct size
  *              if stochastic_round is false, this can be NULL
  *  \param [in] stochastic_round true if stochastic rounding should be used
  *  \param [in] apply_relu true if a relu should be applied to the result
  *  \param [in] stream The cudaStream on which the kernel should be launched
+ *  \param [in] grid Choose a specific grid configuration: 0=32x128, 1=128x32, 2=128x64, 3=128x128
  */
  bool nervana_hgemm(short *A, short *B, short *C,
                     bool a_t, bool b_t,
@@ -104,6 +106,26 @@ bool nervana_unloadKernels();
                     bool stochastic_round, bool apply_relu,
                     CUstream stream, int grid=-1
                     );
+
+ bool nervana_sgemm_colmajor(float *A, float *B, float *C,
+                             bool a_t, bool b_t,
+                             int m, int n, int k,
+                             int lda, int ldb, int ldc,
+                             float alpha, float beta,
+                             unsigned int *rand_state,
+                             bool stochastic_round, bool apply_relu,
+                             CUstream stream, int grid=-1
+                             );
+
+ bool nervana_hgemm_colmajor(short *A, short *B, short *C,
+                             bool a_t, bool b_t,
+                             int m, int n, int k,
+                             int lda, int ldb, int ldc,
+                             float alpha, float beta,
+                             unsigned int *rand_state,
+                             bool stochastic_round, bool apply_relu,
+                             CUstream stream, int grid=-1
+                             );
 
 #ifdef __cplusplus
 }

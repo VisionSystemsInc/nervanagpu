@@ -37,7 +37,7 @@ extern "C" bool nervana_loadKernels(const char* const base_path_cstr) {
     std::lock_guard<std::mutex> lock(nervana_load_kernels_mutex_);
 
     //better would be a vector<string>, but there is a bug in nvcc that prevents this
-    // (bug report filed)
+    // (bug report filed) (fixed in 7.5)
     std::string names[36] = {
         "hgemm_nn_vec_128x128",
         "hgemm_nn_128x128",
@@ -379,4 +379,42 @@ extern "C" bool nervana_hgemm(short *A, short *B, short *C,
     }
 
     return true;
+}
+
+extern "C" bool nervana_sgemm_colmajor(float *A, float *B, float *C,
+                                       bool a_t, bool b_t,
+                                       int m, int n, int k,
+                                       int lda, int ldb, int ldc,
+                                       float alpha, float beta,
+                                       unsigned int *rand_state,
+                                       bool stochastic_round, bool apply_relu,
+                                       CUstream stream, int grid
+                                      )
+{
+    return nervana_sgemm(B, A, C,
+                         b_t, a_t,
+                         n, m, k,
+                         ldb, lda, ldc,
+                         alpha, beta,
+                         rand_state, stochastic_round, apply_relu,
+                         stream, grid);
+}
+
+extern "C" bool nervana_hgemm_colmajor(short *A, short *B, short *C,
+                                       bool a_t, bool b_t,
+                                       int m, int n, int k,
+                                       int lda, int ldb, int ldc,
+                                       float alpha, float beta,
+                                       unsigned int *rand_state,
+                                       bool stochastic_round, bool apply_relu,
+                                       CUstream stream, int grid
+                                      )
+{
+    return nervana_hgemm(B, A, C,
+                         b_t, a_t,
+                         n, m, k,
+                         ldb, lda, ldc,
+                         alpha, beta,
+                         rand_state, stochastic_round, apply_relu,
+                         stream, grid);
 }
