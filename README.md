@@ -1,5 +1,9 @@
 # NervanaGPU library
 
+## Deprecated
+
+NervanaGPU is now maintained as a backend inside of the [neon](https://github.com/NervanaSystems/neon) project. This repository remains for reference only and is no longer updated.
+
 ## Introduction
 
 **nervanagpu** is a Python module for deep learning. It includes,
